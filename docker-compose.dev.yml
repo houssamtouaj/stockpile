@@ -1,0 +1,37 @@
+# Local development dependencies only. The full topology — two API instances behind
+# nginx, which is what makes the Redis backplane demonstrable — is phase 06.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stockpile
+      POSTGRES_USER: stockpile
+      POSTGRES_PASSWORD: stockpile
+    ports:
+      # Published on 5433, not 5432: a native PostgreSQL service commonly already owns
+      # 5432 on a developer machine, and Docker will publish over it without complaining
+      # while every host-side connection silently reaches the native server instead.
+      # Inside the compose network the port is still 5432, so phase 06's topology,
+      # where the API talks to postgres:5432 directly, is unaffected.
+      - "5433:5432"
+    volumes:
+      - stockpile-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockpile -d stockpile"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  stockpile-pgdata:
