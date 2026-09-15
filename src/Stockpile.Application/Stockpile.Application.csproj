@@ -1,13 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\Stockpile.Domain\Stockpile.Domain.csproj" />
-  </ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Stockpile.Domain\Stockpile.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      EF Core ABSTRACTIONS only, for DbSet<T> in IAppDbContext. The relational provider
+      (Npgsql) and EF's storage/provider namespaces stay forbidden here, and the
+      architecture tests in tests/Stockpile.Architecture.Tests enforce that boundary.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
 
 </Project>

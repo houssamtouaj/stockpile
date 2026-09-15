@@ -37,7 +37,10 @@ public class DependencyRuleTests
     {
         var result = Types.InAssembly(ApplicationAssembly)
             .ShouldNot().HaveDependencyOnAny(
-                "Microsoft.EntityFrameworkCore",
+                // EF Core abstractions (DbSet<T>) are permitted in IAppDbContext; the
+                // relational provider and the runtime are not. See the narrower test below.
+                "Microsoft.EntityFrameworkCore.Infrastructure",
+                "Microsoft.EntityFrameworkCore.Storage",
                 "Microsoft.AspNetCore.SignalR",
                 "Microsoft.AspNetCore.Http",
                 "Npgsql",
@@ -46,6 +49,20 @@ public class DependencyRuleTests
                 "Quartz",
                 "Stockpile.Infrastructure",
                 "Stockpile.Api")
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(FailureMessage(result));
+    }
+
+    [Fact]
+    public void Application_handlers_do_not_touch_the_database_provider()
+    {
+        var result = Types.InAssembly(ApplicationAssembly)
+            .That().HaveNameEndingWith("Handler")
+            .ShouldNot().HaveDependencyOnAny(
+                "Microsoft.EntityFrameworkCore.Storage",
+                "Npgsql",
+                "Stockpile.Infrastructure")
             .GetResult();
 
         result.IsSuccessful.ShouldBeTrue(FailureMessage(result));
