@@ -1,0 +1,46 @@
+# ── Local planning notes (deliberately not published) ───────────────
+/docs/
+
+# ── .NET ────────────────────────────────────────────────────────────
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userprefs
+.vs/
+artifacts/
+TestResults/
+coverage/
+*.coverage
+*.trx
+*.received.*
+
+# ── Node / Angular ──────────────────────────────────────────────────
+node_modules/
+dist/
+.angular/
+*.tsbuildinfo
+npm-debug.log*
+playwright-report/
+test-results/
+.nyc_output/
+
+# ── Secrets & local env ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+*.pfx
+*.key
+secrets.json
+
+# ── Tooling / OS ────────────────────────────────────────────────────
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Stockpile.Architecture.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Stockpile.Domain\Stockpile.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Stockpile.Application\Stockpile.Application.csproj" />
+    <ProjectReference Include="..\..\src\Stockpile.Infrastructure\Stockpile.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Stockpile.Api\Stockpile.Api.csproj" />
+  </ItemGroup>
+
+</Project>
