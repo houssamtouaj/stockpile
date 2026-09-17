@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Infrastructure.Persistence;
+using Stockpile.Infrastructure.Realtime;
+using Stockpile.Infrastructure.Time;
 
 namespace Stockpile.Infrastructure;
 
@@ -19,6 +21,10 @@ public static class DependencyInjection
             .UseSnakeCaseNamingConvention());
 
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
+
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<INotificationPublisher, NotificationQueue>();
+        services.AddSingleton<IClock, SystemClock>();
 
         return services;
     }
