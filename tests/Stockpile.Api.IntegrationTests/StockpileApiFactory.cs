@@ -1,7 +1,15 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Shouldly;
+using Stockpile.Domain.Entities;
+using Stockpile.Domain.Enums;
+using Stockpile.Infrastructure.Identity;
 using Stockpile.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
 
@@ -21,6 +29,14 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Postgres", _postgres.GetConnectionString());
+
+        // The Testing environment does not load appsettings.Development.json, so the JWT
+        // settings are supplied here. The signing key must be at least 32 bytes for HS256.
+        builder.UseSetting("Jwt:Issuer", "stockpile-test");
+        builder.UseSetting("Jwt:Audience", "stockpile-test");
+        builder.UseSetting("Jwt:SigningKey", "test-only-signing-key-at-least-32-bytes-long!!");
+        builder.UseSetting("Jwt:AccessTokenMinutes", "15");
+        builder.UseSetting("Jwt:RefreshTokenDays", "14");
     }
 
     // xUnit v3's IAsyncLifetime is ValueTask-based and inherits IAsyncDisposable, so
@@ -79,6 +95,46 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
                 END IF;
             END $$;
             """);
+    }
+
+    public async Task SeedUserAsync(string email, string password, Role role)
+    {
+        using var scope = CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<StockpileIdentityUser>>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var identityUser = new StockpileIdentityUser
+        {
+            Id = Guid.CreateVersion7(),
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true
+        };
+        (await users.CreateAsync(identityUser, password)).Succeeded.ShouldBeTrue();
+
+        db.Users.Add(ApplicationUser.Create(identityUser.Id, email, email.Split('@')[0], role).Value);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The helper every later integration test uses to act as a given role. A unique email
+    /// per call means tests never collide over a shared user, so the suite can run in
+    /// parallel later without a mystery flake.
+    /// </summary>
+    public async Task<HttpClient> CreateClientAs(Role role)
+    {
+        var email = $"{role}-{Guid.CreateVersion7():N}@stockpile.test".ToLowerInvariant();
+        const string password = "Str0ng!Passw0rd";
+        await SeedUserAsync(email, password, role);
+
+        var client = CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
+        var body = await login.Content.ReadFromJsonAsync<JsonElement>();
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", body.GetProperty("accessToken").GetString());
+
+        return client;
     }
 }
 

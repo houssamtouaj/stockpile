@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Stockpile.Application.Common.Interfaces;
+using Stockpile.Infrastructure.Identity;
 using Stockpile.Infrastructure.Persistence;
 using Stockpile.Infrastructure.Realtime;
 using Stockpile.Infrastructure.Time;
@@ -25,6 +27,22 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<INotificationPublisher, NotificationQueue>();
         services.AddSingleton<IClock, SystemClock>();
+
+        // AddIdentityCore rather than AddIdentity: AddIdentity installs cookie
+        // authentication schemes and would fight the JWT scheme registered in Program.cs.
+        // This API is token-only.
+        services.AddIdentityCore<StockpileIdentityUser>(options =>
+            {
+                options.Password.RequiredLength = 12;
+                options.User.RequireUniqueEmail = true;
+            })
+            .AddRoles<IdentityRole<Guid>>()
+            .AddEntityFrameworkStores<AppDbContext>();
+
+        services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.AddSingleton<JwtTokenService>();
+        services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<AuthenticationService>();
 
         return services;
     }
