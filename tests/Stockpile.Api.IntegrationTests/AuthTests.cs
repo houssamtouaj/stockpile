@@ -11,15 +11,25 @@ public class AuthTests(StockpileApiFactory factory)
     private sealed record LoginRequest(string Email, string Password);
     private sealed record LoginResponse(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
 
+    /// <summary>
+    /// A unique address per test, for the same reason <see cref="StockpileApiFactory.CreateClientAs"/>
+    /// generates one: these tests share a database with everything else in the collection and
+    /// never truncate it. A fixed address passes exactly as long as no other test happens to
+    /// reuse it — and then fails on a duplicate-email conflict that reads like an auth bug.
+    /// </summary>
+    private static string UniqueEmail(string prefix) =>
+        $"{prefix}-{Guid.CreateVersion7():N}@stockpile.test";
+
     [Fact]
     public async Task Login_withValidCredentials_returnsTokens()
     {
         var ct = TestContext.Current.CancellationToken;
-        await factory.SeedUserAsync("manager@stockpile.test", "Str0ng!Passw0rd", Role.WarehouseManager);
+        var email = UniqueEmail("manager");
+        await factory.SeedUserAsync(email, "Str0ng!Passw0rd", Role.WarehouseManager);
         var client = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/auth/login",
-            new LoginRequest("manager@stockpile.test", "Str0ng!Passw0rd"), ct);
+            new LoginRequest(email, "Str0ng!Passw0rd"), ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<LoginResponse>(ct);
@@ -32,11 +42,12 @@ public class AuthTests(StockpileApiFactory factory)
     public async Task Login_withWrongPassword_returns401_andNoTokenLeak()
     {
         var ct = TestContext.Current.CancellationToken;
-        await factory.SeedUserAsync("viewer@stockpile.test", "Str0ng!Passw0rd", Role.Viewer);
+        var email = UniqueEmail("viewer");
+        await factory.SeedUserAsync(email, "Str0ng!Passw0rd", Role.Viewer);
         var client = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/auth/login",
-            new LoginRequest("viewer@stockpile.test", "wrong"), ct);
+            new LoginRequest(email, "wrong"), ct);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         (await response.Content.ReadAsStringAsync(ct)).ShouldNotContain("accessToken");
@@ -79,10 +90,11 @@ public class AuthTests(StockpileApiFactory factory)
     public async Task Refresh_withAValidRefreshToken_issuesANewAccessToken()
     {
         var ct = TestContext.Current.CancellationToken;
-        await factory.SeedUserAsync("ops@stockpile.test", "Str0ng!Passw0rd", Role.Operator);
+        var email = UniqueEmail("ops");
+        await factory.SeedUserAsync(email, "Str0ng!Passw0rd", Role.Operator);
         var client = factory.CreateClient();
         var login = await (await client.PostAsJsonAsync("/api/auth/login",
-            new LoginRequest("ops@stockpile.test", "Str0ng!Passw0rd"), ct))
+            new LoginRequest(email, "Str0ng!Passw0rd"), ct))
             .Content.ReadFromJsonAsync<LoginResponse>(ct);
 
         var response = await client.PostAsJsonAsync("/api/auth/refresh",
@@ -97,10 +109,11 @@ public class AuthTests(StockpileApiFactory factory)
     public async Task Refresh_withAnAlreadyUsedRefreshToken_returns401()
     {
         var ct = TestContext.Current.CancellationToken;
-        await factory.SeedUserAsync("rot@stockpile.test", "Str0ng!Passw0rd", Role.Operator);
+        var email = UniqueEmail("rot");
+        await factory.SeedUserAsync(email, "Str0ng!Passw0rd", Role.Operator);
         var client = factory.CreateClient();
         var login = await (await client.PostAsJsonAsync("/api/auth/login",
-            new LoginRequest("rot@stockpile.test", "Str0ng!Passw0rd"), ct))
+            new LoginRequest(email, "Str0ng!Passw0rd"), ct))
             .Content.ReadFromJsonAsync<LoginResponse>(ct);
 
         await client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken = login!.RefreshToken }, ct);

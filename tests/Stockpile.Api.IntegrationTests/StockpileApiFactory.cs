@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -37,6 +39,11 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
         builder.UseSetting("Jwt:SigningKey", "test-only-signing-key-at-least-32-bytes-long!!");
         builder.UseSetting("Jwt:AccessTokenMinutes", "15");
         builder.UseSetting("Jwt:RefreshTokenDays", "14");
+
+        // Routes that exercise the permission matrix, added to the test host only; see
+        // PolicyProbeEndpoints for why they exist at all.
+        builder.ConfigureTestServices(services =>
+            services.AddSingleton<IStartupFilter, PolicyProbeEndpoints.StartupFilter>());
     }
 
     // xUnit v3's IAsyncLifetime is ValueTask-based and inherits IAsyncDisposable, so
