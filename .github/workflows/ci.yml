@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      # Architecture rules first: they are fast, and a violation makes every
+      # downstream failure harder to read.
+      - name: Architecture tests
+        run: dotnet test tests/Stockpile.Architecture.Tests --no-build --configuration Release --logger "trx;LogFileName=arch.trx"
+
+      - name: Domain unit tests
+        run: dotnet test tests/Stockpile.Domain.UnitTests --no-build --configuration Release --logger "trx;LogFileName=domain.trx"
+
+      - name: Application unit tests
+        run: dotnet test tests/Stockpile.Application.UnitTests --no-build --configuration Release --logger "trx;LogFileName=application.trx"
+
+      # Integration tests need a Docker daemon for Testcontainers; ubuntu-latest has one.
+      # Wired up properly, with coverage, in phase 06.
+      - name: Integration tests
+        run: dotnet test tests/Stockpile.Api.IntegrationTests --no-build --configuration Release --logger "trx;LogFileName=integration.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/*.trx'
