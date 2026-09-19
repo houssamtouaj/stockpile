@@ -45,6 +45,7 @@ app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
+app.MapCatalogueEndpoints();
 
 app.Run();
 

@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Stockpile.Domain.Entities;
+using Stockpile.Domain.ValueObjects;
 using Stockpile.Domain.Enums;
 using Stockpile.Infrastructure.Identity;
 using Stockpile.Infrastructure.Persistence;
@@ -142,6 +143,70 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
             "Bearer", body.GetProperty("accessToken").GetString());
 
         return client;
+    }
+
+    public async Task<Guid> SeedWarehouseAsync(string code, WarehouseKind kind = WarehouseKind.Physical)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var warehouse = kind == WarehouseKind.Physical
+            ? Warehouse.CreatePhysical(code, $"Warehouse {code}", null).Value
+            : Warehouse.CreateInTransit(code, $"In transit {code}").Value;
+
+        db.Warehouses.Add(warehouse);
+        await db.SaveChangesAsync();
+        return warehouse.Id;
+    }
+
+    public async Task<Guid> SeedProductAsync(string sku, int reorderPoint = 0, int reorderQuantity = 1)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var product = Product.Create(
+            Sku.Create(sku).Value, $"Product {sku}", null, "Test",
+            unitPriceCents: 1000, barcode: null,
+            reorderPoint: reorderPoint, reorderQuantity: reorderQuantity,
+            createdBy: Guid.Empty, createdAt: DateTimeOffset.UtcNow).Value;
+
+        db.Products.Add(product);
+        await db.SaveChangesAsync();
+        return product.Id;
+    }
+
+    /// <summary>
+    /// Creates the stock row directly, bypassing the API, so tests can establish a precise
+    /// starting quantity without depending on the receipt path — AND writes the matching
+    /// opening-balance Receipt movement, so the ledger always explains the snapshot.
+    /// Without that second row every reconciliation test would report a discrepancy that
+    /// is an artefact of the fixture rather than a defect in the code under test.
+    /// </summary>
+    public async Task SeedStockAsync(Guid productId, Guid warehouseId, int onHand, long averageUnitCostCents = 1000)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO stock_items
+                (id, product_id, warehouse_id, quantity_on_hand,
+                 quantity_reserved, average_unit_cost_cents, bin_location, last_counted_at)
+            VALUES ({0}, {1}, {2}, {3}, 0, {4}, NULL, NULL);
+            """, Guid.CreateVersion7(), productId, warehouseId, onHand, averageUnitCostCents);
+
+        if (onHand == 0)
+            return;   // a zero-delta movement would breach movement_deltas_not_both_zero
+
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO stock_movements
+                (id, product_id, warehouse_id, type, on_hand_delta, reserved_delta,
+                 on_hand_after, reserved_after, unit_cost_cents, reference_type,
+                 reference_id, idempotency_key, reason, occurred_at, performed_by_user_id)
+            VALUES ({0}, {1}, {2}, 0, {3}, 0, {3}, 0, {4}, 'OpeningBalance',
+                    NULL, {5}, 'Test fixture opening balance', now(), {6});
+            """,
+            Guid.CreateVersion7(), productId, warehouseId, onHand, averageUnitCostCents,
+            $"opening-{Guid.CreateVersion7()}", Guid.Empty);
     }
 }
 
