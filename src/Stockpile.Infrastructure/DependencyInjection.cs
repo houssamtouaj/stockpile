@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<IStockWriter, StockWriter>();
         services.AddScoped<INotificationPublisher, NotificationQueue>();
         services.AddSingleton<IClock, SystemClock>();
 
