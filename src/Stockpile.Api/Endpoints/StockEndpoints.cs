@@ -5,6 +5,9 @@ using Stockpile.Application.Stock.Commands.AdjustStock;
 using Stockpile.Application.Stock.Commands.CountStock;
 using Stockpile.Application.Stock.Commands.ReleaseStock;
 using Stockpile.Application.Stock.Commands.ReserveStock;
+using Stockpile.Application.Stock.Queries.GetMovements;
+using Stockpile.Application.Stock.Queries.GetStockLevels;
+using Stockpile.Domain.Enums;
 
 namespace Stockpile.Api.Endpoints;
 
@@ -44,5 +47,23 @@ public static class StockEndpoints
             .WithSummary("Cycle count. Takes the observed absolute quantity, not a delta.")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        stock.MapGet("/", async (
+                Guid? productId, Guid? warehouseId, ISender sender) =>
+                (await sender.Send(new GetStockLevelsQuery(productId, warehouseId))).ToOk())
+            .RequireAuthorization(Policies.CanView)
+            .WithName("GetStockLevels")
+            .WithSummary("Current stock levels, with availability as on-hand minus reserved.");
+
+        stock.MapGet("/movements", async (
+                Guid? productId, Guid? warehouseId,
+                DateTimeOffset? from, DateTimeOffset? to,
+                MovementType? type, string? cursor, int? size,
+                ISender sender) =>
+                (await sender.Send(new GetMovementsQuery(
+                    productId, warehouseId, from, to, type, cursor, size ?? 50))).ToOk())
+            .RequireAuthorization(Policies.CanView)
+            .WithName("GetMovements")
+            .WithSummary("Cursor-paginated movement ledger, newest first.");
     }
 }

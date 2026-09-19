@@ -4,6 +4,7 @@ using Stockpile.Api.Common;
 using Stockpile.Application.Products.Commands.CreateProduct;
 using Stockpile.Application.Products.Queries.GetProduct;
 using Stockpile.Application.Warehouses.Commands.CreateWarehouse;
+using Stockpile.Application.Stock.Queries.GetStockLevels;
 using Stockpile.Application.Warehouses.Queries.GetWarehouses;
 
 namespace Stockpile.Api.Endpoints;
@@ -33,5 +34,12 @@ public static class CatalogueEndpoints
         warehouses.MapGet("/", async (ISender sender) =>
                 (await sender.Send(new GetWarehousesQuery())).ToOk())
             .RequireAuthorization(Policies.CanView);
+
+        warehouses.MapGet("/{id:guid}/stock", async (
+                Guid id, bool? lowStockOnly, ISender sender) =>
+                (await sender.Send(new GetStockLevelsQuery(
+                    ProductId: null, WarehouseId: id, LowStockOnly: lowStockOnly ?? false))).ToOk())
+            .RequireAuthorization(Policies.CanView)
+            .WithName("GetWarehouseStock");
     }
 }
