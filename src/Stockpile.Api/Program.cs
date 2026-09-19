@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddProblemDetails();
 
 var jwt = builder.Configuration.GetSection("Jwt");
 builder.Services
