@@ -3,6 +3,7 @@ using Stockpile.Api.Authorization;
 using Stockpile.Api.Common;
 using Stockpile.Application.Stock.Commands.AdjustStock;
 using Stockpile.Application.Stock.Commands.CountStock;
+using Stockpile.Application.Stock.Commands.ReconcileStock;
 using Stockpile.Application.Stock.Commands.ReleaseStock;
 using Stockpile.Application.Stock.Commands.ReserveStock;
 using Stockpile.Application.Stock.Queries.GetMovements;
@@ -45,6 +46,14 @@ public static class StockEndpoints
             .RequireAuthorization(Policies.CanManageStock)
             .WithName("CountStock")
             .WithSummary("Cycle count. Takes the observed absolute quantity, not a delta.")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        stock.MapPost("/reconcile", async (bool? repair, ISender sender) =>
+                (await sender.Send(new ReconcileStockCommand(repair ?? false))).ToOk())
+            .RequireAuthorization(Policies.CanManageStock)
+            .WithName("ReconcileStock")
+            .WithSummary("Recompute every stock snapshot from the ledger and report discrepancies.")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
