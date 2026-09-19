@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Stockpile.Application.Common.Interfaces;
 using Stockpile.Domain.Entities;
 using Stockpile.Domain.ValueObjects;
 using Stockpile.Domain.Enums;
@@ -207,6 +208,33 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
             """,
             Guid.CreateVersion7(), productId, warehouseId, onHand, averageUnitCostCents,
             $"opening-{Guid.CreateVersion7()}", Guid.Empty);
+    }
+
+    /// <summary>
+    /// Runs a writer call inside a real ambient transaction, mirroring what
+    /// TransactionBehavior does in production. Writer calls outside a transaction throw
+    /// by design, so tests must not bypass this.
+    /// </summary>
+    public async Task<T> WithWriterAsync<T>(Func<IStockWriter, IAppDbContext, Task<T>> body)
+    {
+        using var scope = CreateScope();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+        var writer = scope.ServiceProvider.GetRequiredService<IStockWriter>();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+
+        return await unitOfWork.ExecuteInTransactionAsync(_ => body(writer, db));
+    }
+
+    public async Task<(int OnHand, int Reserved, long AverageCost)> ReadStockAsync(
+        Guid productId, Guid warehouseId)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var item = await db.StockItems.AsNoTracking()
+            .SingleAsync(s => s.ProductId == productId && s.WarehouseId == warehouseId);
+
+        return (item.QuantityOnHand, item.QuantityReserved, item.AverageUnitCostCents);
     }
 }
 
