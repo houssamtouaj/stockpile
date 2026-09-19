@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Stockpile.Application.Common.Behaviors;
+using Stockpile.Application.Common.Stock;
 
 namespace Stockpile.Application;
 
@@ -22,6 +23,8 @@ public static class DependencyInjection
         });
 
         services.AddValidatorsFromAssemblyContaining<AssemblyMarker>(includeInternalTypes: true);
+
+        services.AddScoped<IStockMutator, StockMutator>();
 
         return services;
     }

@@ -1,8 +1,21 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Domain.Common;
 
 namespace Stockpile.Infrastructure.Persistence;
+
+/// <summary>
+/// Raised when a stock CHECK constraint fires. It should never happen: the conditional
+/// UPDATEs in <see cref="StockWriter"/> refuse anything that would breach an invariant, so
+/// reaching the constraint means a predicate has a hole. Translated to a 500 plus a loud
+/// log line by the exception handler, never to a quiet 422.
+/// </summary>
+public sealed class StockInvariantViolatedException(string constraintName)
+    : Exception($"Stock invariant '{constraintName}' was violated. This indicates a defect.")
+{
+    public string ConstraintName { get; } = constraintName;
+}
 
 public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
 {
@@ -42,10 +55,44 @@ public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
                 return result;
             }
 
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsIdempotencyReplay(ex))
+            {
+                // A concurrent request with the same idempotency key won the race and
+                // already applied this mutation. Roll ours back and report success:
+                // the caller's intent has been satisfied exactly once, which is the
+                // contract an idempotency key promises.
+                await transaction.RollbackAsync(ct);
+                return result;
+            }
+            catch (DbUpdateException ex) when (IsStockInvariantViolation(ex, out var constraint))
+            {
+                await transaction.RollbackAsync(ct);
+                throw new StockInvariantViolatedException(constraint);
+            }
+
             await transaction.CommitAsync(ct);
 
             return result;
         }, cancellationToken);
+    }
+
+    private static bool IsIdempotencyReplay(DbUpdateException exception) =>
+        exception.InnerException is PostgresException { SqlState: "23505" } pg
+        && pg.ConstraintName?.Contains("idempotency_key", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsStockInvariantViolation(DbUpdateException exception, out string constraint)
+    {
+        if (exception.InnerException is PostgresException { SqlState: "23514" } pg)
+        {
+            constraint = pg.ConstraintName ?? "unknown";
+            return true;
+        }
+
+        constraint = string.Empty;
+        return false;
     }
 }
