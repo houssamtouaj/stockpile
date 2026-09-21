@@ -29,6 +29,27 @@ public sealed class Customer : Entity
         };
     }
 
+    public Result UpdateDetails(string name, string? email, string? phone, string? shippingAddress)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return new DomainRuleError("customer.name_required", "Customer name is required.");
+
+        Name = name.Trim();
+        Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        ShippingAddress = string.IsNullOrWhiteSpace(shippingAddress) ? null : shippingAddress.Trim();
+        return Result.Ok();
+    }
+
+    public Result Reactivate()
+    {
+        if (IsActive)
+            return new DomainRuleError("customer.already_active", "Customer is already active.");
+
+        IsActive = true;
+        return Result.Ok();
+    }
+
     public Result Deactivate()
     {
         if (!IsActive)

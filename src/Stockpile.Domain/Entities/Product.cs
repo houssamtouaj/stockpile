@@ -92,6 +92,22 @@ public sealed class Product : Entity
         return Result.Ok();
     }
 
+    public Result SetCategory(string category)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+            return new DomainRuleError("product.category_required", "Category is required.");
+
+        Category = category.Trim();
+        return Result.Ok();
+    }
+
+    /// <summary>Clearing the description is legitimate, so an empty string means "none".</summary>
+    public Result SetDescription(string? description)
+    {
+        Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        return Result.Ok();
+    }
+
     public Result SetPricing(long unitPriceCents)
     {
         if (unitPriceCents < 0)

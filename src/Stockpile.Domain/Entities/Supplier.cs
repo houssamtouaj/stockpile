@@ -34,6 +34,27 @@ public sealed class Supplier : Entity
         };
     }
 
+    public Result UpdateDetails(string name, string? email, string? phone, string? address)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return new DomainRuleError("supplier.name_required", "Supplier name is required.");
+
+        Name = name.Trim();
+        Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        Address = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
+        return Result.Ok();
+    }
+
+    public Result Reactivate()
+    {
+        if (IsActive)
+            return new DomainRuleError("supplier.already_active", "Supplier is already active.");
+
+        IsActive = true;
+        return Result.Ok();
+    }
+
     public Result Deactivate()
     {
         if (!IsActive)

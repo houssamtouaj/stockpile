@@ -12,9 +12,10 @@ public sealed record ProductDto(
     string? Barcode,
     int ReorderPoint,
     int ReorderQuantity,
-    bool IsActive)
+    bool IsActive,
+    uint RowVersion)
 {
     public static ProductDto From(Product p) => new(
         p.Id, p.Sku.Value, p.Name, p.Description, p.Category,
-        p.UnitPriceCents, p.Barcode, p.ReorderPoint, p.ReorderQuantity, p.IsActive);
+        p.UnitPriceCents, p.Barcode, p.ReorderPoint, p.ReorderQuantity, p.IsActive, p.RowVersion);
 }

@@ -21,7 +21,8 @@ public sealed class GetProductHandler(IAppDbContext db)
             .Select(p => new
             {
                 p.Id, p.Sku, p.Name, p.Description, p.Category,
-                p.UnitPriceCents, p.Barcode, p.ReorderPoint, p.ReorderQuantity, p.IsActive
+                p.UnitPriceCents, p.Barcode, p.ReorderPoint, p.ReorderQuantity, p.IsActive,
+                p.RowVersion
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -29,6 +30,7 @@ public sealed class GetProductHandler(IAppDbContext db)
             ? new NotFoundError("Product", query.Id)
             : new ProductDto(
                 row.Id, row.Sku.Value, row.Name, row.Description, row.Category,
-                row.UnitPriceCents, row.Barcode, row.ReorderPoint, row.ReorderQuantity, row.IsActive);
+                row.UnitPriceCents, row.Barcode, row.ReorderPoint, row.ReorderQuantity, row.IsActive,
+                row.RowVersion);
     }
 }
