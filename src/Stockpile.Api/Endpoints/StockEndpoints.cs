@@ -1,6 +1,7 @@
 using MediatR;
 using Stockpile.Api.Authorization;
 using Stockpile.Api.Common;
+using Stockpile.Application.Common.Stock;
 using Stockpile.Application.Stock.Commands.AdjustStock;
 using Stockpile.Application.Stock.Commands.CountStock;
 using Stockpile.Application.Stock.Commands.ReconcileStock;
@@ -23,38 +24,43 @@ public static class StockEndpoints
             .RequireAuthorization(Policies.CanOperate)
             .WithName("ReserveStock")
             .WithSummary("Hold stock for an order. Requires an idempotency key.")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .Produces<StockMutationOutcome>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         stock.MapPost("/release", async (ReleaseStockCommand command, ISender sender) =>
                 (await sender.Send(command)).ToOk())
             .RequireAuthorization(Policies.CanOperate)
             .WithName("ReleaseStock")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .WithSummary("Release a previously held reservation. Requires an idempotency key.")
+            .Produces<StockMutationOutcome>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         stock.MapPost("/adjust", async (AdjustStockCommand command, ISender sender) =>
                 (await sender.Send(command)).ToOk())
             .RequireAuthorization(Policies.CanManageStock)
             .WithName("AdjustStock")
             .WithSummary("Signed stock adjustment. Requires a reason and an idempotency key.")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .Produces<StockMutationOutcome>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         stock.MapPost("/count", async (CountStockCommand command, ISender sender) =>
                 (await sender.Send(command)).ToOk())
             .RequireAuthorization(Policies.CanManageStock)
             .WithName("CountStock")
             .WithSummary("Cycle count. Takes the observed absolute quantity, not a delta.")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .Produces<StockMutationOutcome>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         stock.MapPost("/reconcile", async (bool? repair, ISender sender) =>
                 (await sender.Send(new ReconcileStockCommand(repair ?? false))).ToOk())
             .RequireAuthorization(Policies.CanManageStock)
             .WithName("ReconcileStock")
             .WithSummary("Recompute every stock snapshot from the ledger and report discrepancies.")
-            .Produces(StatusCodes.Status200OK)
+            .Produces<ReconciliationReport>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         stock.MapGet("/", async (

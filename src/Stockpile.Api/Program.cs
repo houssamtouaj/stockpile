@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 using Stockpile.Api.Authorization;
+using Stockpile.Api.Common;
 using Stockpile.Api.Endpoints;
 using Stockpile.Application;
 using Stockpile.Infrastructure;
@@ -43,12 +45,28 @@ builder.Services
         };
     });
 
+builder.Services.AddStockpileOpenApi();
+
 builder.Services.AddAuthorizationBuilder().AddStockpilePolicies();
 
 var app = builder.Build();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapOpenApi();
+
+var scalar = app.MapScalarApiReference(options => options
+    .WithTitle("Stockpile API")
+    .WithTheme(ScalarTheme.BluePlanet));
+
+// Anonymous locally and under test; behind a login on the deployed demo — a portfolio
+// API nobody can browse is half a demo, but it should not be open to the internet.
+// Test on Production, not on Development: the integration host runs as "Testing", so
+// IsDevelopment() is false there and OpenApiTests would get a 401 from an anonymous
+// client. Naming the environment that must be locked down is the honest polarity.
+if (app.Environment.IsProduction())
+    scalar.RequireAuthorization(Policies.CanView);
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
