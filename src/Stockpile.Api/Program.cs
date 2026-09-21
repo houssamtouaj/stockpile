@@ -54,7 +54,7 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapOpenApi();
+var openApi = app.MapOpenApi();
 
 var scalar = app.MapScalarApiReference(options => options
     .WithTitle("Stockpile API")
@@ -65,8 +65,16 @@ var scalar = app.MapScalarApiReference(options => options
 // Test on Production, not on Development: the integration host runs as "Testing", so
 // IsDevelopment() is false there and OpenApiTests would get a 401 from an anonymous
 // client. Naming the environment that must be locked down is the honest polarity.
+//
+// BOTH are gated, not just the UI. /scalar/v1 only renders what /openapi/v1.json
+// serves, so locking the renderer while leaving the document anonymous would publish
+// the entire route table, every request schema and every auth requirement to anyone
+// who guessed the second URL — and leave a gate that looks closed but is not.
 if (app.Environment.IsProduction())
+{
+    openApi.RequireAuthorization(Policies.CanView);
     scalar.RequireAuthorization(Policies.CanView);
+}
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
