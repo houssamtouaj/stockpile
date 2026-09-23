@@ -13,7 +13,8 @@ public sealed record MovementContext(
     string IdempotencyKey,
     string? Reason,
     DateTimeOffset OccurredAt,
-    Guid PerformedByUserId);
+    Guid PerformedByUserId,
+    string? RequestHash = null);
 
 /// <summary>
 /// APPEND ONLY. Never updated, never deleted — enforced by a database trigger (task 9).
@@ -44,6 +45,14 @@ public sealed class StockMovement : Entity
     public string ReferenceType { get; private set; } = string.Empty;
     public Guid? ReferenceId { get; private set; }
     public string IdempotencyKey { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// A digest of the request this key stood for, so a key replayed with a DIFFERENT
+    /// request can be told apart from an honest retry. Null on rows written before the
+    /// column existed, and on rows seeded outside the application; a null is treated as
+    /// "cannot tell" and never as a mismatch.
+    /// </summary>
+    public string? RequestHash { get; private set; }
     public string? Reason { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
     public Guid PerformedByUserId { get; private set; }
@@ -102,6 +111,7 @@ public sealed class StockMovement : Entity
             ReferenceType = context.ReferenceType,
             ReferenceId = context.ReferenceId,
             IdempotencyKey = context.IdempotencyKey,
+            RequestHash = context.RequestHash,
             Reason = context.Reason,
             OccurredAt = context.OccurredAt,
             PerformedByUserId = context.PerformedByUserId

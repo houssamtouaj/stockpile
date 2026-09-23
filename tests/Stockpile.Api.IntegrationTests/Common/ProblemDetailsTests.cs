@@ -40,6 +40,42 @@ public class ProblemDetailsTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task StockInvariantViolation_returns500_withTheErrorCodeAndConstraint()
+    {
+        // AddProblemDetails() alone leaves this as a bare 500 with no body, which makes the
+        // one failure that means "a writer predicate has a hole" the one failure a client
+        // or a log line cannot attribute. StockInvariantViolatedError exists precisely to
+        // carry it; without an exception handler in the pipeline it is never constructed.
+        var ct = TestContext.Current.CancellationToken;
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync(FaultProbeEndpoints.StockInvariantRoute, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("stock.invariant_violated");
+        problem.GetProperty("detail").GetString()!.ShouldContain(FaultProbeEndpoints.ConstraintName);
+    }
+
+    [Fact]
+    public async Task UnmappedException_returns500_asAProblemDocument_withoutLeakingTheMessage()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync(FaultProbeEndpoints.UnexpectedRoute, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("unexpected_error");
+        problem.GetProperty("detail").GetString()!.ShouldNotContain("probe:");
+    }
+
+    [Fact]
     public async Task ForbiddenRole_returns403()
     {
         var ct = TestContext.Current.CancellationToken;

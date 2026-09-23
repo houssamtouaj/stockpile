@@ -15,6 +15,7 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<StockpileExceptionHandler>();
 
 // Enums cross the wire as their names, not their ordinals. A client branching on
 // "ReservationHold" keeps working when a new MovementType is inserted in the middle of
@@ -50,6 +51,11 @@ builder.Services.AddStockpileOpenApi();
 builder.Services.AddAuthorizationBuilder().AddStockpilePolicies();
 
 var app = builder.Build();
+
+// First in the pipeline, so nothing downstream can escape as a bare 500. AddProblemDetails()
+// above is only half of it: it supplies the document shape, this supplies the handler that
+// produces one at all.
+app.UseExceptionHandler();
 
 app.UseAuthentication();
 app.UseAuthorization();

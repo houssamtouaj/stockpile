@@ -121,6 +121,16 @@ internal sealed class ReconciliationReader(AppDbContext db) : IReconciliationRea
         return rows;
     }
 
+    /// <summary>
+    /// EXCLUSIVE, not ACCESS EXCLUSIVE: it conflicts with ROW EXCLUSIVE (every writer) while
+    /// still allowing ACCESS SHARE (every reader), so the stock pages keep serving during a
+    /// repair. Held to the end of the ambient transaction, which is what closes the window
+    /// between the scan and the UPDATE as well as the one inside it.
+    /// </summary>
+    public Task LockForRepairAsync(CancellationToken ct = default) =>
+        db.Database.ExecuteSqlRawAsync(
+            "LOCK TABLE stock_items, stock_movements IN EXCLUSIVE MODE;", ct);
+
     public Task<int> CountStockRowsAsync(CancellationToken ct = default) =>
         db.StockItems.CountAsync(ct);
 

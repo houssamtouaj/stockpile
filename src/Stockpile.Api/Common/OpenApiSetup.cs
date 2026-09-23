@@ -1,4 +1,5 @@
 using Microsoft.OpenApi;
+using Stockpile.Application.Common.Patching;
 
 namespace Stockpile.Api.Common;
 
@@ -35,6 +36,25 @@ public static class OpenApiSetup
                     In = ParameterLocation.Header,
                     Description = "Paste the accessToken returned by POST /api/auth/login."
                 };
+
+                return Task.CompletedTask;
+            });
+
+            // Patch<T> exists only to tell an omitted field from an explicit null; on the
+            // wire it IS the value, or null. Left alone, the generator meets a type it
+            // cannot introspect (it has a custom converter) and emits `{ }` for every
+            // patchable field — a document that says "anything goes" where it used to say
+            // "a nullable string".
+            options.AddSchemaTransformer((schema, context, _) =>
+            {
+                var type = context.JsonTypeInfo.Type;
+
+                if (type.IsGenericType
+                    && type.GetGenericTypeDefinition() == typeof(Patch<>)
+                    && type.GetGenericArguments()[0] == typeof(string))
+                {
+                    schema.Type = JsonSchemaType.String | JsonSchemaType.Null;
+                }
 
                 return Task.CompletedTask;
             });

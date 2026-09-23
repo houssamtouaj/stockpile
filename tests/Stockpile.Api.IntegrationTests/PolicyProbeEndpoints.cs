@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
@@ -37,40 +35,6 @@ namespace Stockpile.Api.IntegrationTests;
 internal static class PolicyProbeEndpoints
 {
     public static string RouteFor(string policy) => $"/test/policy/{policy}";
-
-    /// <summary>
-    /// Adds the probe routes to the endpoint route builder the app itself used. An
-    /// <see cref="EndpointDataSource"/> registered in DI is NOT picked up — the routing
-    /// middleware matches against the data sources collected by <c>UseEndpoints</c>, so the
-    /// routes have to join that collection. It is an <see cref="ObservableCollection{T}"/>
-    /// on purpose, which is what makes this late addition work.
-    /// </summary>
-    internal sealed class StartupFilter : IStartupFilter
-    {
-        // The key WebApplication stashes itself under, as IEndpointRouteBuilder. Internal to
-        // ASP.NET Core (EndpointRoutingApplicationBuilderExtensions), hence the literal.
-        private const string EndpointRouteBuilderKey = "__EndpointRouteBuilder";
-
-        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-        {
-            // The app's own configuration runs first: it is what puts the route builder in
-            // Properties and maps the real endpoints.
-            next(app);
-
-            if (app.Properties.TryGetValue(EndpointRouteBuilderKey, out var value) &&
-                value is IEndpointRouteBuilder routes)
-            {
-                routes.DataSources.Add(DataSource);
-            }
-            else
-            {
-                throw new InvalidOperationException(
-                    $"No '{EndpointRouteBuilderKey}' in IApplicationBuilder.Properties — ASP.NET " +
-                    "Core changed how WebApplication exposes its endpoint route builder, and the " +
-                    "permission-matrix probes would silently 404 instead of failing here.");
-            }
-        };
-    }
 
     public static EndpointDataSource DataSource { get; } = new DefaultEndpointDataSource(
     [

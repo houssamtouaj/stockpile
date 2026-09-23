@@ -17,7 +17,8 @@ public sealed class ReleaseStockHandler(IStockMutator mutator)
                 command.IdempotencyKey,
                 command.ReferenceType ?? "Manual",
                 command.ReferenceId,
-                Reason: null),
+                Reason: null,
+                Operation: $"release:{command.Quantity}"),
             write: (writer, ct) =>
                 writer.TryReleaseAsync(command.ProductId, command.WarehouseId, command.Quantity, ct),
             buildMovement: (context, write) =>

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Application.Common.Pagination;
+using Stockpile.Application.Common.Querying;
 using Stockpile.Application.Products.Queries.GetProduct;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.ValueObjects;
@@ -29,7 +30,7 @@ public sealed class SearchProductsHandler(IAppDbContext db)
             // the idiomatic Postgres spelling, but it is an Npgsql extension and the
             // dependency rule keeps the provider out of Application. UPPER(...) LIKE still
             // runs in the database; ToUpper().Contains() in C# would not.
-            var pattern = $"%{raw.ToUpperInvariant()}%";
+            var pattern = LikePattern.Contains(raw.ToUpperInvariant());
 
             // Sku is a value-converted property, so EF coerces anything compared against
             // that column through the Sku converter — which a '%term%' pattern cannot
@@ -42,8 +43,10 @@ public sealed class SearchProductsHandler(IAppDbContext db)
 
             source = exactSku.IsSuccess
                 ? source.Where(p =>
-                    EF.Functions.Like(p.Name.ToUpper(), pattern) || p.Sku == exactSku.Value)
-                : source.Where(p => EF.Functions.Like(p.Name.ToUpper(), pattern));
+                    EF.Functions.Like(p.Name.ToUpper(), pattern, LikePattern.EscapeCharacter)
+                    || p.Sku == exactSku.Value)
+                : source.Where(p =>
+                    EF.Functions.Like(p.Name.ToUpper(), pattern, LikePattern.EscapeCharacter));
         }
 
         if (!string.IsNullOrWhiteSpace(query.Category))
@@ -52,7 +55,10 @@ public sealed class SearchProductsHandler(IAppDbContext db)
         var totalCount = await source.CountAsync(cancellationToken);
 
         var rows = await source
+            // Id breaks the tie. Without it two products sharing a name have no defined
+            // order between pages, so one can repeat on page 2 while another is never shown.
             .OrderBy(p => p.Name)
+            .ThenBy(p => p.Id)
             .Skip((page - 1) * size)
             .Take(size)
             .Select(p => new

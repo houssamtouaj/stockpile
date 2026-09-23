@@ -21,6 +21,11 @@ public sealed class StockMovementConfiguration : IEntityTypeConfiguration<StockM
         builder.Property(m => m.Type).HasConversion<int>().IsRequired();
         builder.Property(m => m.ReferenceType).HasMaxLength(50).IsRequired();
         builder.Property(m => m.IdempotencyKey).HasMaxLength(100).IsRequired();
+
+        // A SHA-256 hex digest. Nullable on purpose: rows seeded outside the application
+        // (test fixtures, the phase 07 demo data) carry no digest, and a missing one must
+        // read as "cannot tell" rather than as a mismatch.
+        builder.Property(m => m.RequestHash).HasMaxLength(64);
         builder.Property(m => m.Reason).HasMaxLength(500);
 
         // Race-safe idempotency: the unique index is the guarantee, the pre-check is

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Stockpile.Application.Common.Exceptions;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Domain.Common;
 
@@ -59,14 +60,21 @@ public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
             {
                 await db.SaveChangesAsync(ct);
             }
-            catch (DbUpdateException ex) when (IsIdempotencyReplay(ex))
+            catch (DbUpdateException ex) when (IsIdempotencyReplay(ex, out var replayedKeyIndex))
             {
                 // A concurrent request with the same idempotency key won the race and
-                // already applied this mutation. Roll ours back and report success:
-                // the caller's intent has been satisfied exactly once, which is the
-                // contract an idempotency key promises.
+                // already applied this mutation. Everything this attempt computed is now
+                // void: `result` carries the after-values returned by a conditional UPDATE
+                // that has just been rolled back, so handing it back would report a
+                // quantity that never existed — and report it as a fresh application.
+                //
+                // Discard the tracked state and signal a replay instead. TransactionBehavior
+                // re-runs the operation, whose idempotency fast path now finds the winner's
+                // committed movement and returns ITS recorded after-values. That is the only
+                // answer that was ever true, and the only one the caller can act on.
                 await transaction.RollbackAsync(ct);
-                return result;
+                db.ChangeTracker.Clear();
+                throw new IdempotencyReplayException(replayedKeyIndex);
             }
             catch (DbUpdateException ex) when (IsStockInvariantViolation(ex, out var constraint))
             {
@@ -80,9 +88,18 @@ public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
         }, cancellationToken);
     }
 
-    private static bool IsIdempotencyReplay(DbUpdateException exception) =>
-        exception.InnerException is PostgresException { SqlState: "23505" } pg
-        && pg.ConstraintName?.Contains("idempotency_key", StringComparison.OrdinalIgnoreCase) == true;
+    private static bool IsIdempotencyReplay(DbUpdateException exception, out string constraint)
+    {
+        if (exception.InnerException is PostgresException { SqlState: "23505" } pg
+            && pg.ConstraintName?.Contains("idempotency_key", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            constraint = pg.ConstraintName;
+            return true;
+        }
+
+        constraint = string.Empty;
+        return false;
+    }
 
     private static bool IsStockInvariantViolation(DbUpdateException exception, out string constraint)
     {

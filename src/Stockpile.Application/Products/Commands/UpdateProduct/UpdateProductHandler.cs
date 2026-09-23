@@ -65,6 +65,23 @@ public sealed class UpdateProductHandler(IAppDbContext db)
                 return toggled.Error;
         }
 
+        // EF only emits `WHERE id = @id AND xmin = @original` when at least one property is
+        // actually modified. A PATCH whose every value already matches what is stored
+        // modifies nothing, SaveChanges returns 0 without raising
+        // DbUpdateConcurrencyException, and the stale token the client sent is never
+        // checked — so a client whose read is out of date is told their write landed while
+        // holding someone else's data. Asking the loaded token the same question the WHERE
+        // clause would have asked closes that path.
+        // The token is excluded: pinning its OriginalValue above is itself seen as a
+        // change, so counting it would make this test never fire.
+        var changed = db.Entry(product).Properties
+            .Any(p => p.IsModified && !p.Metadata.IsConcurrencyToken);
+
+        if (!changed && product.RowVersion != command.RowVersion)
+        {
+            return new ConcurrencyConflictError("Product", command.Id);
+        }
+
         try
         {
             // Saved here so the conflict surfaces as a Result the endpoint can map to 409,

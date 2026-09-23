@@ -17,13 +17,14 @@ public sealed class ReserveStockHandler(IStockMutator mutator)
                 command.IdempotencyKey,
                 command.ReferenceType ?? "Manual",
                 command.ReferenceId,
-                Reason: null),
+                Reason: null,
+                Operation: $"reserve:{command.Quantity}"),
             write: (writer, ct) =>
                 writer.TryReserveAsync(command.ProductId, command.WarehouseId, command.Quantity, ct),
             buildMovement: (context, write) =>
                 StockMovement.ReservationHold(
                     context, command.Quantity, write.OnHandAfter, write.ReservedAfter),
-            onRefused: available =>
-                new InsufficientStockError(command.Quantity, available),
+            onRefused: held =>
+                new InsufficientStockError(command.Quantity, held.Available),
             cancellationToken);
 }

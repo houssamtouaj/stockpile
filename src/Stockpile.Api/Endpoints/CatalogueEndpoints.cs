@@ -1,6 +1,7 @@
 using MediatR;
 using Stockpile.Api.Authorization;
 using Stockpile.Api.Common;
+using Stockpile.Application.Common.Patching;
 using Stockpile.Application.Customers.Commands.CreateCustomer;
 using Stockpile.Application.Customers.Commands.UpdateCustomer;
 using Stockpile.Application.Customers.Queries.SearchCustomers;
@@ -29,11 +30,15 @@ public static class CatalogueEndpoints
         string? Name, string? Description, string? Category, long? UnitPriceCents,
         int? ReorderPoint, int? ReorderQuantity, bool? IsActive, uint RowVersion);
 
+    // Patch<string> on the nullable fields: an omitted field and an explicit null are
+    // different instructions, and string? cannot tell them apart.
     public sealed record PatchSupplierRequest(
-        string? Name, string? Email, string? Phone, string? Address, bool? IsActive, uint RowVersion);
+        string? Name, Patch<string> Email, Patch<string> Phone, Patch<string> Address,
+        bool? IsActive, uint RowVersion);
 
     public sealed record PatchCustomerRequest(
-        string? Name, string? Email, string? Phone, string? ShippingAddress, bool? IsActive, uint RowVersion);
+        string? Name, Patch<string> Email, Patch<string> Phone, Patch<string> ShippingAddress,
+        bool? IsActive, uint RowVersion);
 
     public static void MapCatalogueEndpoints(this IEndpointRouteBuilder app)
     {

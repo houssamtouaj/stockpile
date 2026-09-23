@@ -10,6 +10,13 @@ public sealed class ReconcileStockHandler(IReconciliationReader reader)
     public async Task<Result<ReconciliationReport>> Handle(
         ReconcileStockCommand command, CancellationToken cancellationToken)
     {
+        // Taken BEFORE the scan, not before the repair: the repair rewrites snapshots from
+        // totals the scan computed, so both statements have to see the same world. A
+        // read-only reconcile takes nothing — it is a report, and a report that blocks
+        // every warehouse to produce itself is not worth having.
+        if (command.Repair)
+            await reader.LockForRepairAsync(cancellationToken);
+
         var rowsChecked = await reader.CountStockRowsAsync(cancellationToken);
         var discrepancies = await reader.FindDiscrepanciesAsync(cancellationToken);
 

@@ -9,6 +9,27 @@ public abstract record Error(string Code, string Message);
 public sealed record NotFoundError(string EntityType, Guid Id)
     : Error("not_found", $"{EntityType} '{Id}' was not found.");
 
+/// <summary>
+/// No stock row exists for this (product, warehouse) pairing. Separate from
+/// <see cref="NotFoundError"/> because the missing thing is the pairing, not either id on
+/// its own: "StockItem '&lt;a product id&gt;' was not found" sends whoever reads it looking
+/// up a StockItem by an id that was never a StockItem id, and says nothing about which
+/// warehouse was asked for.
+/// </summary>
+public sealed record StockItemNotFoundError(Guid ProductId, Guid WarehouseId)
+    : Error("not_found",
+            $"No stock record exists for product '{ProductId}' in warehouse '{WarehouseId}'.");
+
+/// <summary>
+/// An idempotency key was replayed with a different request. Returning the first request's
+/// result would silently drop the second one; the key identifies an attempt, not a licence
+/// to substitute one mutation for another. Maps to 409.
+/// </summary>
+public sealed record IdempotencyKeyReusedError(string IdempotencyKey)
+    : Error("idempotency.key_reused",
+            $"Idempotency key '{IdempotencyKey}' was already used for a different request. "
+            + "Use a new key, or resend the original request unchanged.");
+
 public sealed record InsufficientStockError(int Requested, int Available)
     : Error("stock.insufficient",
             $"Requested {Requested} unit(s) but only {Available} are available.");

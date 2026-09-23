@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Shouldly;
 using Stockpile.Domain.Enums;
 using Stockpile.Infrastructure.Persistence;
@@ -172,6 +173,78 @@ public class ReconciliationTests(StockpileApiFactory factory)
         var after = await (await manager.PostAsync("/api/stock/reconcile", null, ct))
             .Content.ReadFromJsonAsync<JsonElement>(ct);
         after.GetProperty("discrepancyCount").GetInt32().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Repair_waitsForConcurrentWriters_insteadOfRacingThem()
+    {
+        // Unlocked, the repair manufactures the discrepancy it exists to remove: the ledger
+        // totals come from the scan's snapshot, but the UPDATE re-evaluates rows against
+        // versions committed after it, so a reservation that lands mid-statement has its
+        // quantity_reserved overwritten by a total that never counted its movement.
+        var ct = Ct;
+        await factory.ResetDatabaseAsync();
+        var productId = await factory.SeedProductAsync("REC-006");
+        var warehouseId = await factory.SeedWarehouseAsync("REC-WH6");
+        await factory.SeedStockAsync(productId, warehouseId, 50);
+
+        var manager = await factory.CreateClientAs(Role.WarehouseManager);
+
+        // A writer holding stock_items, on a connection the application does not own.
+        // ROW EXCLUSIVE, which is what every stock mutation takes.
+        await using var writer = new NpgsqlConnection(factory.ConnectionString);
+        await writer.OpenAsync(ct);
+        await using var held = await writer.BeginTransactionAsync(ct);
+        await using (var update = writer.CreateCommand())
+        {
+            update.Transaction = held;
+            update.CommandText = "UPDATE stock_items SET bin_location = 'held';";
+            await update.ExecuteNonQueryAsync(ct);
+        }
+
+        var repair = manager.PostAsync("/api/stock/reconcile?repair=true", null, ct);
+
+        await Task.WhenAny(repair, Task.Delay(TimeSpan.FromSeconds(2), ct));
+        repair.IsCompleted.ShouldBeFalse(
+            "reconcile?repair=true ran to completion while another transaction held "
+            + "stock_items, so it is reading and rewriting snapshots a concurrent writer "
+            + "is still changing.");
+
+        await held.RollbackAsync(ct);
+
+        (await repair).StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task AReadOnlyReconcile_isNotBlockedByConcurrentWriters()
+    {
+        // The other half of the trade: a report must not stop the warehouse to produce
+        // itself. EXCLUSIVE conflicts with writers and not with readers, and only a repair
+        // takes it at all.
+        var ct = Ct;
+        await factory.ResetDatabaseAsync();
+        var productId = await factory.SeedProductAsync("REC-007");
+        var warehouseId = await factory.SeedWarehouseAsync("REC-WH7");
+        await factory.SeedStockAsync(productId, warehouseId, 50);
+
+        var manager = await factory.CreateClientAs(Role.WarehouseManager);
+
+        await using var writer = new NpgsqlConnection(factory.ConnectionString);
+        await writer.OpenAsync(ct);
+        await using var held = await writer.BeginTransactionAsync(ct);
+        await using (var update = writer.CreateCommand())
+        {
+            update.Transaction = held;
+            update.CommandText = "UPDATE stock_items SET bin_location = 'held';";
+            await update.ExecuteNonQueryAsync(ct);
+        }
+
+        var report = await (await manager.PostAsync("/api/stock/reconcile", null, ct))
+            .Content.ReadFromJsonAsync<JsonElement>(ct);
+
+        report.GetProperty("discrepancyCount").GetInt32().ShouldBe(0);
+
+        await held.RollbackAsync(ct);
     }
 
     [Fact]

@@ -63,6 +63,33 @@ public class OpenApiTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Document_describesAPatchableFieldAsANullableValue_notAsAnything()
+    {
+        // Patch<T> carries a custom converter, so the generator cannot introspect it and
+        // falls back to `{ }` — a document that promises nothing about a field that used
+        // to be documented as a nullable string. The schema transformer is what stops the
+        // mechanism for explicit-null handling from costing the API its own description.
+        var ct = Ct;
+        var document = JsonDocument.Parse(
+            await factory.CreateClient().GetStringAsync("/openapi/v1.json", ct));
+
+        var email = document.RootElement
+            .GetProperty("components").GetProperty("schemas")
+            .GetProperty("PatchSupplierRequest")
+            .GetProperty("properties").GetProperty("email");
+
+        // Either inlined or behind a $ref, the schema it resolves to must be a nullable string.
+        var schema = email.TryGetProperty("$ref", out var reference)
+            ? document.RootElement.GetProperty("components").GetProperty("schemas")
+                .GetProperty(reference.GetString()!.Split('/')[^1])
+            : email;
+
+        schema.GetProperty("type").EnumerateArray()
+            .Select(t => t.GetString())
+            .ShouldBe(["null", "string"], ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task ScalarUi_isServed()
     {
         var ct = Ct;

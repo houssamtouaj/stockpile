@@ -25,15 +25,16 @@ public sealed class CountStockHandler(IStockMutator mutator, IClock clock)
         mutator.ApplyAsync(
             new StockMutationRequest(
                 command.ProductId, command.WarehouseId, command.IdempotencyKey,
-                ReferenceType: "CycleCount", ReferenceId: null, Reason: command.Reason),
+                ReferenceType: "CycleCount", ReferenceId: null, Reason: command.Reason,
+                Operation: $"count:{command.ObservedOnHand}"),
             write: (writer, ct) => writer.TryCountAsync(
                 command.ProductId, command.WarehouseId, command.ObservedOnHand, clock.UtcNow, ct),
             buildMovement: (context, write) =>
                 StockMovement.Count(
                     context, write.PreviousOnHand, command.ObservedOnHand, write.ReservedAfter),
-            onRefused: available => new DomainRuleError(
+            onRefused: held => new DomainRuleError(
                 "stock.count_refused",
-                $"A count of {command.ObservedOnHand} is below the {available} unit(s) "
+                $"A count of {command.ObservedOnHand} is below the {held.Reserved} unit(s) "
                 + "currently reserved. Release the reservations first."),
             cancellationToken);
 }

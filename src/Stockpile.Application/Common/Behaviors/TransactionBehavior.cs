@@ -1,4 +1,5 @@
 using MediatR;
+using Stockpile.Application.Common.Exceptions;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Application.Common.Messaging;
 using Stockpile.Domain.Common;
@@ -34,8 +35,28 @@ public sealed class TransactionBehavior<TRequest, TResponse>(
         TResponse response;
         try
         {
-            response = await unitOfWork.ExecuteInTransactionAsync(
-                async ct => await next(ct), cancellationToken);
+            try
+            {
+                response = await unitOfWork.ExecuteInTransactionAsync(
+                    async ct => await next(ct), cancellationToken);
+            }
+            catch (IdempotencyReplayException)
+            {
+                // The transaction rolled back, so anything the losing attempt queued
+                // describes state that was never committed. Dropping it is the same rule
+                // the flush-after-commit ordering exists to enforce; without it, every
+                // loser of an idempotency race would broadcast a phantom quantity once
+                // phase 04 puts a real transport behind FlushAsync.
+                notifications.Clear();
+
+                // Replayed exactly once. The winner is committed by now, so the handler's
+                // idempotency fast path finds its movement and returns the recorded
+                // after-values. A second IdempotencyReplayException would mean the fast
+                // path cannot see a row the unique index says exists — a real fault, and
+                // it is left to propagate as one.
+                response = await unitOfWork.ExecuteInTransactionAsync(
+                    async ct => await next(ct), cancellationToken);
+            }
         }
         catch
         {

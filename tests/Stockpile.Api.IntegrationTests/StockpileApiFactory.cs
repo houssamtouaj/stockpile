@@ -42,10 +42,12 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
         builder.UseSetting("Jwt:AccessTokenMinutes", "15");
         builder.UseSetting("Jwt:RefreshTokenDays", "14");
 
-        // Routes that exercise the permission matrix, added to the test host only; see
-        // PolicyProbeEndpoints for why they exist at all.
+        // Routes that exercise the permission matrix and the exception-to-problem-document
+        // mapping, added to the test host only; see PolicyProbeEndpoints and
+        // FaultProbeEndpoints for why they exist at all.
         builder.ConfigureTestServices(services =>
-            services.AddSingleton<IStartupFilter, PolicyProbeEndpoints.StartupFilter>());
+            services.AddSingleton<IStartupFilter>(new TestRouteStartupFilter(
+                PolicyProbeEndpoints.DataSource, FaultProbeEndpoints.DataSource)));
     }
 
     // xUnit v3's IAsyncLifetime is ValueTask-based and inherits IAsyncDisposable, so
@@ -69,6 +71,13 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
     }
 
     public IServiceScope CreateScope() => Services.CreateScope();
+
+    /// <summary>
+    /// For the few tests that need a connection the application does not own — proving a
+    /// lock is actually held, for instance, which cannot be done from inside the same
+    /// transaction that holds it.
+    /// </summary>
+    public string ConnectionString => _postgres.GetConnectionString();
 
     /// <summary>
     /// Truncates every table between tests. RESTART IDENTITY CASCADE keeps the

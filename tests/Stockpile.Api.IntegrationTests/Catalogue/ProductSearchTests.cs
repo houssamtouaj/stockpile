@@ -107,6 +107,62 @@ public class ProductSearchTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Search_treatsWildcardsAsLiteralCharacters()
+    {
+        // An unescaped pattern hands the user's own characters to the matcher: "%" on its
+        // own returns the whole catalogue a page at a time, and "_" matches any character.
+        // A search box means the text that was typed.
+        var ct = Ct;
+        var client = await SeedCatalogueAsync();
+        await client.PostAsJsonAsync("/api/products",
+            Product("DISC-50", "50% Off Sticker", "Labels"), ct);
+
+        var percent = await client.GetFromJsonAsync<JsonElement>("/api/products?search=50%25", ct);
+        percent.GetProperty("totalCount").GetInt32().ShouldBe(1);
+        percent.GetProperty("items").EnumerateArray().Single()
+            .GetProperty("sku").GetString().ShouldBe("DISC-50");
+
+        // A lone wildcard finds the one name that literally contains a percent sign,
+        // rather than paging through the entire catalogue.
+        var lone = await client.GetFromJsonAsync<JsonElement>("/api/products?search=%25", ct);
+        lone.GetProperty("totalCount").GetInt32().ShouldBe(1);
+
+        // Underscore is a single-character wildcard unescaped, so "He_ Nut" would match
+        // "Hex Nut M8".
+        var underscore = await client.GetFromJsonAsync<JsonElement>("/api/products?search=He_%20Nut", ct);
+        underscore.GetProperty("totalCount").GetInt32().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Search_pagesStably_whenNamesCollide()
+    {
+        // OrderBy(Name) alone leaves rows sharing a name in whatever order the plan
+        // happens to produce, and that order need not hold across the two queries a client
+        // makes for page 1 and page 2: one row comes back twice and another never appears.
+        var ct = Ct;
+        await factory.ResetDatabaseAsync();
+        var client = await factory.CreateClientAs(Role.WarehouseManager);
+
+        foreach (var suffix in new[] { "A", "B", "C", "D" })
+        {
+            await client.PostAsJsonAsync("/api/products",
+                Product($"DUPE-{suffix}", "Identical Name", "Fasteners"), ct);
+        }
+
+        var ids = new List<Guid>();
+        for (var page = 1; page <= 2; page++)
+        {
+            var body = await client.GetFromJsonAsync<JsonElement>(
+                $"/api/products?search=identical&page={page}&size=2", ct);
+            ids.AddRange(body.GetProperty("items").EnumerateArray()
+                .Select(i => i.GetProperty("id").GetGuid()));
+        }
+
+        ids.Count.ShouldBe(4);
+        ids.Distinct().Count().ShouldBe(4);
+    }
+
+    [Fact]
     public async Task ByBarcode_returnsTheProduct()
     {
         var ct = Ct;

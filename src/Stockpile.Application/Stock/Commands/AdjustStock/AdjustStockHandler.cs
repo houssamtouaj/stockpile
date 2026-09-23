@@ -13,15 +13,16 @@ public sealed class AdjustStockHandler(IStockMutator mutator)
         mutator.ApplyAsync(
             new StockMutationRequest(
                 command.ProductId, command.WarehouseId, command.IdempotencyKey,
-                ReferenceType: "Adjustment", ReferenceId: null, Reason: command.Reason),
+                ReferenceType: "Adjustment", ReferenceId: null, Reason: command.Reason,
+                Operation: $"adjust:{command.OnHandDelta}"),
             write: (writer, ct) =>
                 writer.TryAdjustAsync(command.ProductId, command.WarehouseId, command.OnHandDelta, ct),
             buildMovement: (context, write) =>
                 StockMovement.Adjustment(
                     context, command.OnHandDelta, write.OnHandAfter, write.ReservedAfter),
-            onRefused: available => new DomainRuleError(
+            onRefused: held => new DomainRuleError(
                 "stock.adjustment_refused",
                 $"An adjustment of {command.OnHandDelta} would take on-hand below zero or "
-                + $"below the reserved quantity. {available} unit(s) are currently available."),
+                + $"below the reserved quantity. {held.Available} unit(s) are currently available."),
             cancellationToken);
 }

@@ -104,6 +104,54 @@ public class CustomerEndpointTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Patch_thatChangesNothing_stillRejectsAStaleRowVersion()
+    {
+        // No property differs, so EF emits no UPDATE and the xmin predicate never runs.
+        var ct = Ct;
+        await factory.ResetDatabaseAsync();
+        var client = await factory.CreateClientAs(Role.WarehouseManager);
+
+        var created = await (await client.PostAsJsonAsync("/api/customers", ValidCustomer("Noop Co"), ct))
+            .Content.ReadFromJsonAsync<JsonElement>(ct);
+
+        var id = created.GetProperty("id").GetGuid();
+        var staleVersion = created.GetProperty("rowVersion").GetUInt32();
+
+        (await client.PatchAsJsonAsync($"/api/customers/{id}",
+            new { shippingAddress = "Moved by someone else", rowVersion = staleVersion }, ct))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var noOp = await client.PatchAsJsonAsync($"/api/customers/{id}",
+            new { name = "Noop Co", rowVersion = staleVersion }, ct);
+
+        noOp.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Patch_withAnExplicitNull_clearsTheField()
+    {
+        var ct = Ct;
+        await factory.ResetDatabaseAsync();
+        var client = await factory.CreateClientAs(Role.WarehouseManager);
+
+        var created = await (await client.PostAsJsonAsync("/api/customers", ValidCustomer("Clear Co"), ct))
+            .Content.ReadFromJsonAsync<JsonElement>(ct);
+
+        created.GetProperty("shippingAddress").GetString().ShouldNotBeNull();
+
+        var patched = await client.PatchAsJsonAsync($"/api/customers/{created.GetProperty("id").GetGuid()}", new
+        {
+            shippingAddress = (string?)null,
+            rowVersion = created.GetProperty("rowVersion").GetUInt32()
+        }, ct);
+
+        patched.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await patched.Content.ReadFromJsonAsync<JsonElement>(ct);
+        body.GetProperty("shippingAddress").ValueKind.ShouldBe(JsonValueKind.Null);
+        body.GetProperty("email").GetString().ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Patch_anUnknownCustomer_returns404()
     {
         var ct = Ct;

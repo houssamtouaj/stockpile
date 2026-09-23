@@ -144,6 +144,61 @@ public class AdjustAndCountTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Count_belowReserved_namesTheReservedQuantity_notTheAvailableOne()
+    {
+        // The operator is being told to release reservations, so the number in the message
+        // has to be the number of reservations. Reporting availability (on-hand minus
+        // reserved) under the label "currently reserved" gives them a figure that appears
+        // nowhere in the row and cannot tell them how much to release.
+        var ct = Ct;
+        var (client, productId, warehouseId) = await ArrangeAsync(onHand: 10);
+        var operatorClient = await factory.CreateClientAs(Role.Operator);
+        await operatorClient.PostAsJsonAsync("/api/stock/reserve",
+            new { productId, warehouseId, quantity = 8, idempotencyKey = $"r-{Guid.CreateVersion7()}" }, ct);
+
+        var response = await client.PostAsJsonAsync("/api/stock/count", new
+        {
+            productId, warehouseId, observedOnHand = 5, reason = "Count",
+            idempotencyKey = $"cnt-{Guid.CreateVersion7()}"
+        }, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("stock.count_refused");
+
+        var detail = problem.GetProperty("detail").GetString()!;
+        detail.ShouldContain("8 unit(s)");
+        detail.ShouldNotContain("2 unit(s)");
+    }
+
+    [Fact]
+    public async Task Mutating_aPairingWithNoStockRow_returns404_namingBothIds()
+    {
+        // The missing thing is the (product, warehouse) pairing. "StockItem '<a product
+        // id>' was not found" sends whoever reads it looking up a StockItem by an id that
+        // is not a StockItem id, and never mentions which warehouse was asked for.
+        var ct = Ct;
+        var (client, productId, _) = await ArrangeAsync(onHand: 10);
+        var elsewhere = await factory.SeedWarehouseAsync("ADJ-WH-EMPTY");
+
+        var response = await client.PostAsJsonAsync("/api/stock/adjust", new
+        {
+            productId, warehouseId = elsewhere, onHandDelta = -1, reason = "Nothing here",
+            idempotencyKey = $"adj-{Guid.CreateVersion7()}"
+        }, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("not_found");
+        problem.GetProperty("productId").GetGuid().ShouldBe(productId);
+        problem.GetProperty("warehouseId").GetGuid().ShouldBe(elsewhere);
+
+        var detail = problem.GetProperty("detail").GetString()!;
+        detail.ShouldContain(productId.ToString());
+        detail.ShouldContain(elsewhere.ToString());
+    }
+
+    [Fact]
     public async Task Count_toTheSameQuantity_isRejectedRatherThanWritingAZeroDeltaMovement()
     {
         var ct = Ct;
