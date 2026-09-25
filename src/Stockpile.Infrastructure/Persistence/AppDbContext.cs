@@ -25,6 +25,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     /// </summary>
     public new DbSet<ApplicationUser> Users => Set<ApplicationUser>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
+    public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 

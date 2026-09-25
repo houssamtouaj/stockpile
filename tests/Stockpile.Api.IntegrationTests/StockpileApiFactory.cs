@@ -113,6 +113,15 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
                 END IF;
             END $$;
             """);
+
+        // RESTART IDENTITY only covers sequences OWNED by a truncated column. The document
+        // number sequences belong to no column, so without this a test asserting
+        // "SO-2026-00001" passes or fails depending on which tests ran before it.
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER SEQUENCE purchase_order_number_seq RESTART WITH 1;
+            ALTER SEQUENCE sales_order_number_seq    RESTART WITH 1;
+            ALTER SEQUENCE stock_transfer_number_seq RESTART WITH 1;
+            """);
     }
 
     public async Task SeedUserAsync(string email, string password, Role role)
@@ -183,6 +192,28 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
         db.Products.Add(product);
         await db.SaveChangesAsync();
         return product.Id;
+    }
+
+    public async Task<Guid> SeedCustomerAsync(string name)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var customer = Customer.Create(name, email: null, phone: null, shippingAddress: null).Value;
+        db.Customers.Add(customer);
+        await db.SaveChangesAsync();
+        return customer.Id;
+    }
+
+    public async Task<Guid> SeedSupplierAsync(string code)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var supplier = Supplier.Create(code, $"Supplier {code}", email: null, phone: null, address: null).Value;
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+        return supplier.Id;
     }
 
     /// <summary>
