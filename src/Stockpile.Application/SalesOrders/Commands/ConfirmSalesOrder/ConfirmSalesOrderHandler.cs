@@ -44,7 +44,7 @@ public sealed class ConfirmSalesOrderHandler(
                 new StockMutationRequest(
                     line.ProductId,
                     order.WarehouseId,
-                    DerivedIdempotencyKey.For(command.IdempotencyKey, "line", line.Id),
+                    DerivedIdempotencyKey.For(command.IdempotencyKey, DerivedIdempotencyKey.ConfirmLine, line.Id),
                     ReferenceType: nameof(SalesOrder),
                     ReferenceId: order.Id,
                     Reason: null,

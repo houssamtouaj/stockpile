@@ -45,7 +45,9 @@ internal static class TransferLegs
 
         await writer.LockRowsAsync(rows, ct);
 
-        var stageName = stage == TransferStage.Dispatch ? "dispatch" : "receive";
+        var (stageName, outLeg, inLeg) = stage == TransferStage.Dispatch
+            ? ("dispatch", DerivedIdempotencyKey.DispatchOut, DerivedIdempotencyKey.DispatchIn)
+            : ("receive", DerivedIdempotencyKey.ReceiveOut, DerivedIdempotencyKey.ReceiveIn);
 
         foreach (var line in transfer.Lines)
         {
@@ -70,7 +72,7 @@ internal static class TransferLegs
             var outbound = await mutator.ApplyAsync(
                 new StockMutationRequest(
                     line.ProductId, fromWarehouseId,
-                    DerivedIdempotencyKey.For(idempotencyKey, $"{stageName}-out", line.Id),
+                    DerivedIdempotencyKey.For(idempotencyKey, outLeg, line.Id),
                     nameof(StockTransfer), transfer.Id, Reason: null,
                     Operation: $"tr-{stageName}:out:{line.Quantity}"),
                 write: (w, c) => w.TryWithdrawAtCostAsync(line.ProductId, fromWarehouseId, line.Quantity, unitCost, c),
@@ -85,7 +87,7 @@ internal static class TransferLegs
             var inbound = await mutator.ApplyAsync(
                 new StockMutationRequest(
                     line.ProductId, toWarehouseId,
-                    DerivedIdempotencyKey.For(idempotencyKey, $"{stageName}-in", line.Id),
+                    DerivedIdempotencyKey.For(idempotencyKey, inLeg, line.Id),
                     nameof(StockTransfer), transfer.Id, Reason: null,
                     Operation: $"tr-{stageName}:in:{line.Quantity}"),
                 write: (w, c) => w.TryReceiveAsync(line.ProductId, toWarehouseId, line.Quantity, unitCost, c),

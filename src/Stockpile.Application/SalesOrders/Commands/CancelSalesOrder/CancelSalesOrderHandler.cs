@@ -44,7 +44,7 @@ public sealed class CancelSalesOrderHandler(
                 new StockMutationRequest(
                     line.ProductId,
                     order.WarehouseId,
-                    DerivedIdempotencyKey.For(command.IdempotencyKey, "release", line.Id),
+                    DerivedIdempotencyKey.For(command.IdempotencyKey, DerivedIdempotencyKey.CancelLine, line.Id),
                     ReferenceType: nameof(SalesOrder),
                     ReferenceId: order.Id,
                     Reason: "Sales order cancelled",

@@ -43,7 +43,7 @@ public sealed class ShipSalesOrderHandler(
                 new StockMutationRequest(
                     line.ProductId,
                     order.WarehouseId,
-                    DerivedIdempotencyKey.For(command.IdempotencyKey, "issue", line.Id),
+                    DerivedIdempotencyKey.For(command.IdempotencyKey, DerivedIdempotencyKey.ShipLine, line.Id),
                     ReferenceType: nameof(SalesOrder),
                     ReferenceId: order.Id,
                     Reason: null,

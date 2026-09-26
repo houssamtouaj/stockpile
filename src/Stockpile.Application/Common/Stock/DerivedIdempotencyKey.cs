@@ -8,12 +8,34 @@ namespace Stockpile.Application.Common.Stock;
 /// </summary>
 public static class DerivedIdempotencyKey
 {
+    /// <summary>stock_movements.idempotency_key holds 100 characters.</summary>
+    public const int MaxKeyLength = 100;
+
     /// <summary>
-    /// stock_movements.idempotency_key holds 100 characters. The longest suffix appended
-    /// here is ":release:" plus a 36-character Guid, 45 in all, so a client key longer than
-    /// 50 would overflow the column and fail as a 500 instead of a 400.
+    /// The cap on every client key an order or transfer endpoint accepts, whether it is
+    /// derived from or used as-is. The longest leg below is "dispatch-out", so the longest
+    /// suffix is ":dispatch-out:" plus a 36-character Guid — 50 characters — and a 50-character
+    /// client key derives exactly 100. DerivedIdempotencyKeyTests holds every leg to that.
     /// </summary>
     public const int MaxClientKeyLength = 50;
 
-    public static string For(string clientKey, string leg, Guid lineId) => $"{clientKey}:{leg}:{lineId}";
+    public const string ConfirmLine = "line";
+    public const string ShipLine = "issue";
+    public const string CancelLine = "release";
+    public const string DispatchOut = "dispatch-out";
+    public const string DispatchIn = "dispatch-in";
+    public const string ReceiveOut = "receive-out";
+    public const string ReceiveIn = "receive-in";
+
+    public static IReadOnlyList<string> Legs { get; } =
+        [ConfirmLine, ShipLine, CancelLine, DispatchOut, DispatchIn, ReceiveOut, ReceiveIn];
+
+    /// <summary>
+    /// Only the listed legs: an unlisted one would escape the length test, and the first
+    /// sign of a leg too long for the column would be a 500 in production.
+    /// </summary>
+    public static string For(string clientKey, string leg, Guid lineId) =>
+        Legs.Contains(leg)
+            ? $"{clientKey}:{leg}:{lineId}"
+            : throw new ArgumentOutOfRangeException(nameof(leg), leg, "Add the leg to DerivedIdempotencyKey.Legs.");
 }
