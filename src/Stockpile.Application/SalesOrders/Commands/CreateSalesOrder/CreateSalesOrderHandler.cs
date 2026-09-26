@@ -19,8 +19,16 @@ public sealed class CreateSalesOrderHandler(
     public async Task<Result<SalesOrderDto>> Handle(
         CreateSalesOrderCommand command, CancellationToken cancellationToken)
     {
-        if (!await db.Customers.AnyAsync(c => c.Id == command.CustomerId, cancellationToken))
+        var customerIsActive = await db.Customers
+            .Where(c => c.Id == command.CustomerId)
+            .Select(c => (bool?)c.IsActive)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (customerIsActive is null)
             return new NotFoundError("Customer", command.CustomerId);
+
+        if (customerIsActive is false)
+            return new DomainRuleError("so.customer_inactive", "This customer is inactive and cannot be sold to.");
 
         var warehouse = await db.Warehouses
             .AsNoTracking()
@@ -28,6 +36,9 @@ public sealed class CreateSalesOrderHandler(
 
         if (warehouse is null)
             return new NotFoundError("Warehouse", command.WarehouseId);
+
+        if (!warehouse.IsActive)
+            return new DomainRuleError("so.warehouse_inactive", "This warehouse is inactive.");
 
         // Nobody can pick from a truck: in-transit stock belongs to a transfer.
         if (warehouse.Kind != WarehouseKind.Physical)
@@ -40,7 +51,7 @@ public sealed class CreateSalesOrderHandler(
         if (validLines.IsFailure)
             return validLines.Error;
 
-        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), "so", cancellationToken)
             is { } productRefused)
             return productRefused;
 

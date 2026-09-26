@@ -19,8 +19,16 @@ public sealed class CreatePurchaseOrderHandler(
     public async Task<Result<PurchaseOrderDto>> Handle(
         CreatePurchaseOrderCommand command, CancellationToken cancellationToken)
     {
-        if (!await db.Suppliers.AnyAsync(s => s.Id == command.SupplierId, cancellationToken))
+        var supplierIsActive = await db.Suppliers
+            .Where(s => s.Id == command.SupplierId)
+            .Select(s => (bool?)s.IsActive)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (supplierIsActive is null)
             return new NotFoundError("Supplier", command.SupplierId);
+
+        if (supplierIsActive is false)
+            return new DomainRuleError("po.supplier_inactive", "This supplier is inactive and cannot be ordered from.");
 
         var warehouse = await db.Warehouses
             .AsNoTracking()
@@ -28,6 +36,9 @@ public sealed class CreatePurchaseOrderHandler(
 
         if (warehouse is null)
             return new NotFoundError("Warehouse", command.WarehouseId);
+
+        if (!warehouse.IsActive)
+            return new DomainRuleError("po.warehouse_inactive", "This warehouse is inactive.");
 
         // Suppliers deliver to a dock, not to a truck already on the road.
         if (warehouse.Kind != WarehouseKind.Physical)
@@ -40,7 +51,7 @@ public sealed class CreatePurchaseOrderHandler(
         if (validLines.IsFailure)
             return validLines.Error;
 
-        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), "po", cancellationToken)
             is { } productRefused)
             return productRefused;
 

@@ -216,6 +216,16 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
         return supplier.Id;
     }
 
+    public async Task DeactivateWarehouseAsync(Guid warehouseId)
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var warehouse = await db.Warehouses.SingleAsync(w => w.Id == warehouseId);
+        warehouse.Deactivate().IsSuccess.ShouldBeTrue();
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>
     /// Creates the stock row directly, bypassing the API, so tests can establish a precise
     /// starting quantity without depending on the receipt path — AND writes the matching

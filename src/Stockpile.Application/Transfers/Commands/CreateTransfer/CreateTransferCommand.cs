@@ -56,8 +56,11 @@ public sealed class CreateTransferHandler(
 
         foreach (var id in ids)
         {
-            if (!warehouses.ContainsKey(id))
+            if (!warehouses.TryGetValue(id, out var warehouse))
                 return new NotFoundError("Warehouse", id);
+
+            if (!warehouse.IsActive)
+                return new DomainRuleError("transfer.warehouse_inactive", $"Warehouse '{id}' is inactive.");
         }
 
         // The in-transit leg must be a warehouse that exists to hold units on the road;
@@ -80,7 +83,7 @@ public sealed class CreateTransferHandler(
         if (valid.IsFailure)
             return valid.Error;
 
-        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), "transfer", cancellationToken)
             is { } productRefused)
             return productRefused;
 
