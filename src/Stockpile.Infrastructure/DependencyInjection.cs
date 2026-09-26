@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<IStockWriter, StockWriter>();
         services.AddScoped<IReconciliationReader, ReconciliationReader>();
         services.AddScoped<IDocumentNumberGenerator, DocumentNumberGenerator>();
+        services.AddScoped<IProcessedRequestStore, ProcessedRequestStore>();
         services.AddScoped<INotificationPublisher, NotificationQueue>();
         services.AddSingleton<IClock, SystemClock>();
 

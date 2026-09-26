@@ -255,6 +255,110 @@ public class SalesOrderTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Pick_retriedWithTheSameKey_countsTheUnitsOnce()
+    {
+        // The response to a partial pick is lost and the client retries. Counted twice, the
+        // line would show 4 of 4 picked with only 2 on the cart: pack would pass, and ship
+        // would issue 4 units out of stock.
+        var f = await ArrangeAsync();
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 4, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+        var lineA = await LineIdAsync(f, id, f.ProductA);
+        var key = $"pick-{Guid.CreateVersion7()}";
+
+        var first = await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick",
+            new { lineId = lineA, quantity = 2, idempotencyKey = key }, Ct);
+        var retry = await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick",
+            new { lineId = lineA, quantity = 2, idempotencyKey = key }, Ct);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        retry.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var body = await retry.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        body.GetProperty("lines").EnumerateArray()
+            .Single(l => l.GetProperty("id").GetGuid() == lineA)
+            .GetProperty("quantityPicked").GetInt32().ShouldBe(2);
+
+        var detail = await f.Manager.GetFromJsonAsync<JsonElement>($"/api/sales-orders/{id}", Ct);
+        detail.GetProperty("lines").EnumerateArray()
+            .Single(l => l.GetProperty("id").GetGuid() == lineA)
+            .GetProperty("quantityPicked").GetInt32().ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Pick_raced_withTheSameKey_countsTheUnitsOnce_andNeverFailsWithA500()
+    {
+        // Concurrent first attempts all miss the lookup. The primary key on the processed
+        // key lets one commit; the rest replay (200) or lose on the order's xmin (409).
+        var f = await ArrangeAsync();
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 4, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+        var lineA = await LineIdAsync(f, id, f.ProductA);
+        var key = $"pick-{Guid.CreateVersion7()}";
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ =>
+            f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick",
+                new { lineId = lineA, quantity = 2, idempotencyKey = key }, Ct)));
+
+        responses.ShouldAllBe(r =>
+            r.StatusCode == HttpStatusCode.OK || r.StatusCode == HttpStatusCode.Conflict);
+
+        var detail = await f.Manager.GetFromJsonAsync<JsonElement>($"/api/sales-orders/{id}", Ct);
+        detail.GetProperty("lines").EnumerateArray()
+            .Single(l => l.GetProperty("id").GetGuid() == lineA)
+            .GetProperty("quantityPicked").GetInt32().ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Pick_reusingAKeyForADifferentPick_returns409()
+    {
+        var f = await ArrangeAsync();
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 4, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+        var lineA = await LineIdAsync(f, id, f.ProductA);
+        var key = $"pick-{Guid.CreateVersion7()}";
+
+        await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick",
+            new { lineId = lineA, quantity = 1, idempotencyKey = key }, Ct);
+        var reused = await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick",
+            new { lineId = lineA, quantity = 3, idempotencyKey = key }, Ct);
+
+        reused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        var problem = await reused.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("idempotency.key_reused");
+    }
+
+    [Fact]
+    public async Task Pick_withoutAKey_stillAccumulates()
+    {
+        // The key is optional: two keyless picks are two picks, as before.
+        var f = await ArrangeAsync();
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 4, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+        var lineA = await LineIdAsync(f, id, f.ProductA);
+
+        await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick", new { lineId = lineA, quantity = 2 }, Ct);
+        var second = await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick", new { lineId = lineA, quantity = 2 }, Ct);
+
+        second.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await second.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("lines").EnumerateArray()
+            .Single(l => l.GetProperty("id").GetGuid() == lineA)
+            .GetProperty("quantityPicked").GetInt32().ShouldBe(4);
+    }
+
+    private async Task<Guid> LineIdAsync(Fixture f, Guid orderId, Guid productId)
+    {
+        var detail = await f.Manager.GetFromJsonAsync<JsonElement>($"/api/sales-orders/{orderId}", Ct);
+        return detail.GetProperty("lines").EnumerateArray()
+            .Single(l => l.GetProperty("productId").GetGuid() == productId)
+            .GetProperty("id").GetGuid();
+    }
+
+    [Fact]
     public async Task AfterAFullLifecycle_reconcileReportsZeroDiscrepancies()
     {
         var f = await ArrangeAsync();

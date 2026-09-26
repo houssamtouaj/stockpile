@@ -15,6 +15,7 @@ namespace Stockpile.Application.SalesOrders.Commands.PickSalesOrder;
 /// </summary>
 public sealed class PickSalesOrderHandler(
     IAppDbContext db,
+    IProcessedRequestStore processedRequests,
     INotificationPublisher notifications) : IRequestHandler<PickSalesOrderCommand, Result<SalesOrderDto>>
 {
     public async Task<Result<SalesOrderDto>> Handle(
@@ -27,9 +28,25 @@ public sealed class PickSalesOrderHandler(
         if (order is null)
             return new NotFoundError("SalesOrder", command.SalesOrderId);
 
+        var fingerprint = $"so-pick|{order.Id}|{command.LineId}|{command.Quantity}";
+        if (command.IdempotencyKey is { } key)
+        {
+            // Already applied: answer with the order as it stands, and pick nothing.
+            switch (await processedRequests.MatchAsync(key, fingerprint, cancellationToken))
+            {
+                case ProcessedRequestMatch.SameRequest:
+                    return SalesOrderDto.From(order);
+                case ProcessedRequestMatch.DifferentRequest:
+                    return new IdempotencyKeyReusedError(key);
+            }
+        }
+
         var picked = order.Pick(command.LineId, command.Quantity);
         if (picked.IsFailure)
             return picked.Error;
+
+        if (command.IdempotencyKey is not null)
+            processedRequests.Record(command.IdempotencyKey, fingerprint);
 
         // A second pick on an order already in Picking changes only the line, and lines
         // carry no concurrency token — two concurrent picks would each read the same

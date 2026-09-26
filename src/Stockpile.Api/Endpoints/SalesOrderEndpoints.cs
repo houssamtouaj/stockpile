@@ -16,7 +16,11 @@ namespace Stockpile.Api.Endpoints;
 
 public static class SalesOrderEndpoints
 {
-    public sealed record PickRequest(Guid LineId, int Quantity);
+    /// <summary>
+    /// IdempotencyKey is optional so the §8 body stays valid, but a client that retries a
+    /// pick must send one: picks accumulate, and a keyless retry counts the units twice.
+    /// </summary>
+    public sealed record PickRequest(Guid LineId, int Quantity, string? IdempotencyKey = null);
 
     /// <summary>
     /// §8's matrix: confirm, ship and cancel are the manager's calls because they commit or
@@ -65,10 +69,11 @@ public static class SalesOrderEndpoints
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         orders.MapPost("/{id:guid}/pick", async (Guid id, PickRequest request, ISender sender) =>
-                (await sender.Send(new PickSalesOrderCommand(id, request.LineId, request.Quantity))).ToOk())
+                (await sender.Send(new PickSalesOrderCommand(
+                    id, request.LineId, request.Quantity, request.IdempotencyKey))).ToOk())
             .RequireAuthorization(Policies.CanOperate)
             .WithName("PickSalesOrder")
-            .WithSummary("Record units picked for one line. Moves no stock.")
+            .WithSummary("Record units picked for one line. Moves no stock. Send an idempotency key to make retries safe.")
             .Produces<SalesOrderDto>()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
