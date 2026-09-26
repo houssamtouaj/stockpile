@@ -26,41 +26,20 @@ public sealed class ReceivePurchaseOrderHandler(
         if (order is null)
             return new NotFoundError("PurchaseOrder", command.PurchaseOrderId);
 
-        // Unlike every other order transition, a receipt is repeatable, so the status guard
-        // does not stop a retry from applying twice. The mutator would replay the stock
-        // write, but by then ReceiveLine would already have counted the units against the
-        // line a second time — on-hand right, the order's receipt count wrong, and the
-        // honest retry of a final delivery refused as exceeding the outstanding quantity.
-        // So a key already in the ledger skips the domain step; the mutator still runs, to
-        // confirm the key stands for THIS request and to return the recorded outcome.
-        var alreadyApplied = await db.StockMovements
-            .AnyAsync(m => m.IdempotencyKey == command.IdempotencyKey, cancellationToken);
-
-        PurchaseOrderLine line;
-        if (alreadyApplied)
-        {
-            var existing = order.Lines.SingleOrDefault(l => l.Id == command.LineId);
-            if (existing is null)
-                return new NotFoundError("PurchaseOrderLine", command.LineId);
-            line = existing;
-        }
-        else
-        {
-            var received = order.ReceiveLine(command.LineId, command.Quantity, clock.UtcNow);
-            if (received.IsFailure)
-                return received.Error;
-            line = received.Value;
-
-            // A partial receipt on an order already PartiallyReceived changes only the line,
-            // which has no concurrency token. Forcing the order row into the UPDATE puts its
-            // xmin check on every receipt, so of two concurrent receipts the loser gets a
-            // 409 — and its stock write rolls back — instead of silently losing a count.
-            db.Entry(order).Property(o => o.Status).IsModified = true;
-        }
+        var line = order.Lines.SingleOrDefault(l => l.Id == command.LineId);
+        if (line is null)
+            return new NotFoundError("PurchaseOrderLine", command.LineId);
 
         // A product may never have been stocked at this warehouse before.
         await writer.EnsureStockItemAsync(line.ProductId, order.WarehouseId, cancellationToken);
 
+        // The stock write runs first so its replay check is the only one. Unlike every other
+        // order transition, a receipt is repeatable, so the status guard cannot stop a retry:
+        // were ReceiveLine to run on a replay, it would count the units against the line a
+        // second time — on-hand right, the order's receipt count wrong, and the honest retry
+        // of a final delivery refused as exceeding the outstanding quantity. So the domain
+        // step runs only for a fresh receipt, and if it refuses, the failed Result rolls
+        // this stock write back with it.
         var mutation = await mutator.ApplyAsync(
             new StockMutationRequest(
                 line.ProductId,
@@ -83,11 +62,21 @@ public sealed class ReceivePurchaseOrderHandler(
         if (mutation.IsFailure)
             return mutation.Error;
 
-        if (!mutation.Value.WasReplay)
-        {
-            notifications.Enqueue(new OrderStatusChangedNotification(
-                order.WarehouseId, order.Id, nameof(PurchaseOrder), order.Status.ToString()));
-        }
+        if (mutation.Value.WasReplay)
+            return PurchaseOrderDto.From(order);
+
+        var received = order.ReceiveLine(command.LineId, command.Quantity, clock.UtcNow);
+        if (received.IsFailure)
+            return received.Error;
+
+        // A partial receipt on an order already PartiallyReceived changes only the line,
+        // which has no concurrency token. Forcing the order row into the UPDATE puts its
+        // xmin check on every receipt, so of two concurrent receipts the loser gets a
+        // 409 — and its stock write rolls back — instead of silently losing a count.
+        db.Entry(order).Property(o => o.Status).IsModified = true;
+
+        notifications.Enqueue(new OrderStatusChangedNotification(
+            order.WarehouseId, order.Id, nameof(PurchaseOrder), order.Status.ToString()));
 
         return PurchaseOrderDto.From(order);
     }
