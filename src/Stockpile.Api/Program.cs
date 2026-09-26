@@ -87,6 +87,7 @@ app.MapAuthEndpoints();
 app.MapCatalogueEndpoints();
 app.MapStockEndpoints();
 app.MapSalesOrderEndpoints();
+app.MapPurchaseOrderEndpoints();
 
 app.Run();
 
