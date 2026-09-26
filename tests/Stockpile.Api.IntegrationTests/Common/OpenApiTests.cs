@@ -50,6 +50,21 @@ public class OpenApiTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Document_advertisesThe409OnPack()
+    {
+        // Pack writes the order row under its xmin token, so a pack racing a pick or a
+        // cancel loses with a 409 like every other transition on the order.
+        var ct = Ct;
+        var document = JsonDocument.Parse(
+            await factory.CreateClient().GetStringAsync("/openapi/v1.json", ct));
+
+        document.RootElement
+            .GetProperty("paths").GetProperty("/api/sales-orders/{id}/pack")
+            .GetProperty("post").GetProperty("responses")
+            .TryGetProperty("409", out _).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Document_declaresBearerSecurity()
     {
         var ct = Ct;

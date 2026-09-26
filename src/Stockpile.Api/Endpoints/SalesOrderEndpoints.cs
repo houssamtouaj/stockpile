@@ -84,6 +84,7 @@ public static class SalesOrderEndpoints
             .WithName("PackSalesOrder")
             .WithSummary("Mark a fully picked order packed. Moves no stock.")
             .Produces<SalesOrderDto>()
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         orders.MapPost("/{id:guid}/ship", async (Guid id, IdempotentRequest request, ISender sender) =>
