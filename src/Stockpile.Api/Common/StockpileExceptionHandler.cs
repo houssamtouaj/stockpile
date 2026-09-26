@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Stockpile.Domain.Common;
 using Stockpile.Infrastructure.Persistence;
 
@@ -34,6 +35,24 @@ internal sealed class StockpileExceptionHandler(ILogger<StockpileExceptionHandle
                 invariant.ConstraintName, httpContext.Request.Method, httpContext.Request.Path);
 
             await new StockInvariantViolatedError(invariant.ConstraintName)
+                .ToProblem()
+                .ExecuteAsync(httpContext);
+
+            return true;
+        }
+
+        if (exception is DbUpdateConcurrencyException concurrency)
+        {
+            // Two transitions raced on one order: both loaded it, and the loser's UPDATE
+            // matched no row on xmin at commit. The transaction has already rolled back —
+            // stock mutations included — so this is the ordinary 409 an edit-style
+            // aggregate gives, not a fault. Handlers cannot return it themselves because the
+            // save that discovers it happens in the unit of work, after they have returned.
+            var entity = concurrency.Entries.FirstOrDefault()?.Entity;
+
+            await new ConcurrencyConflictError(
+                    entity?.GetType().Name ?? "Entity",
+                    (entity as Entity)?.Id ?? Guid.Empty)
                 .ToProblem()
                 .ExecuteAsync(httpContext);
 
