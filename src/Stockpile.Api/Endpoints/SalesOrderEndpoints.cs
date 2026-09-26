@@ -7,6 +7,7 @@ using Stockpile.Application.SalesOrders.Commands.CreateSalesOrder;
 using Stockpile.Application.SalesOrders.Commands.PackSalesOrder;
 using Stockpile.Application.SalesOrders.Commands.PickSalesOrder;
 using Stockpile.Application.SalesOrders.Commands.ShipSalesOrder;
+using Stockpile.Application.SalesOrders.Queries.GetOrderBoard;
 using Stockpile.Application.SalesOrders.Queries.GetSalesOrder;
 using Stockpile.Application.SalesOrders.Queries.GetSalesOrders;
 using Stockpile.Domain.Enums;
@@ -31,6 +32,13 @@ public static class SalesOrderEndpoints
             .RequireAuthorization(Policies.CanView)
             .WithName("GetSalesOrders")
             .WithSummary("Sales orders, newest first, optionally filtered by warehouse and status.");
+
+        orders.MapGet("/board", async (Guid? warehouseId, ISender sender) =>
+                (await sender.Send(new GetOrderBoardQuery(warehouseId))).ToOk())
+            .RequireAuthorization(Policies.CanView)
+            .WithName("GetOrderBoard")
+            .WithSummary("Every open sales order grouped by status, one column per open status.")
+            .Produces<OrderBoardDto>();
 
         orders.MapGet("/{id:guid}", async (Guid id, ISender sender) =>
                 (await sender.Send(new GetSalesOrderQuery(id))).ToOk())
