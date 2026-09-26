@@ -61,8 +61,6 @@ public sealed class CreateSalesOrderHandler(
 
         var order = SalesOrder.Create(number, command.CustomerId, command.WarehouseId, clock.UtcNow, lines).Value;
         db.SalesOrders.Add(order);
-
-        // Flushed so Postgres assigns xmin and the response carries a usable RowVersion.
         await db.SaveChangesAsync(cancellationToken);
 
         notifications.Enqueue(new OrderStatusChangedNotification(
