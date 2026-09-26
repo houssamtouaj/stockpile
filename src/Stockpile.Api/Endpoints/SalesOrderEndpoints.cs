@@ -15,9 +15,6 @@ namespace Stockpile.Api.Endpoints;
 
 public static class SalesOrderEndpoints
 {
-    /// <summary>The body of every transition that moves stock: the id is in the route.</summary>
-    public sealed record IdempotentRequest(string IdempotencyKey);
-
     public sealed record PickRequest(Guid LineId, int Quantity);
 
     /// <summary>

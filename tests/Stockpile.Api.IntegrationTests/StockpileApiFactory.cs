@@ -265,6 +265,20 @@ public class StockpileApiFactory : WebApplicationFactory<Program>, IAsyncLifetim
         return await unitOfWork.ExecuteInTransactionAsync(_ => body(writer, db));
     }
 
+    /// <summary>
+    /// SUM(quantity_on_hand * average_unit_cost_cents) across every stock row: the figure a
+    /// transfer must conserve at every step, mid-flight included.
+    /// </summary>
+    public async Task<long> TotalValuationAsync()
+    {
+        using var scope = CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        return await db.StockItems
+            .AsNoTracking()
+            .SumAsync(s => (long)s.QuantityOnHand * s.AverageUnitCostCents);
+    }
+
     public async Task<(int OnHand, int Reserved, long AverageCost)> ReadStockAsync(
         Guid productId, Guid warehouseId)
     {

@@ -123,8 +123,31 @@ configuration value, through the standard environment-variable provider. `appset
 deployment to silently fall back to if it forgets to set one. The integration tests supply
 their own key through `StockpileApiFactory`.
 
+### Transfers never leave units in limbo
+
+A transfer moves stock in two steps through a warehouse with `Kind = InTransit`: dispatch moves
+it from the source into that warehouse, receipt moves it on to the destination. Each step
+writes a paired `TransferOut` / `TransferIn` for every line, and **both legs of every line run
+in one database transaction**, so a step either happens completely or not at all. That is the
+mechanical reason total valuation is conserved mid-flight: at every moment each unit sits in
+exactly one stock row, at one cost. `TransferTests.DispatchThenReceive_conservesTotalValuation`
+checks it before dispatch, in flight and after receipt.
+
+The cost a unit carries is the source's weighted average, read just before the outbound leg.
+Two known imprecisions come with integer-cent weighted-average costing: a receipt that lands at
+the source concurrently can make that figure marginally stale, and blending into a destination
+that already holds the product at a different cost rounds the new average to the nearest cent.
+
 ## Not in scope
 
 FIFO costing (weighted average only), multi-currency (integer cents, single currency) and
 reversing an in-transit transfer are deliberate exclusions, not omissions. The reasoning for
 each will be recorded here as the phase that meets it lands.
+
+- **Cancelling a dispatched transfer** is refused (`transfer.cannot_cancel_after_dispatch`)
+  rather than implemented. Undoing a dispatch means inventing compensating movements whose
+  cost basis is ambiguous once the in-transit average has blended with other transfers. The
+  honest operational answer is the one the error gives: receive it at the destination, then
+  transfer it back.
+- **Returns on shipped sales orders** are not modelled; cancelling a shipped order is refused
+  with `so.already_shipped`.
