@@ -61,6 +61,52 @@ public class TransferValuationTests(StockpileApiFactory factory)
         (await factory.TotalValuationAsync()).ShouldBe(afterReceipt);
     }
 
+    [Fact]
+    public async Task TwoTransfersInFlight_atDifferentCosts_eachArriveAtTheCostTheyLeftAt()
+    {
+        // Both loads share one in-transit row, whose average blends them to 200. A receipt
+        // must carry the cost its own transfer left at — 100 or 300 — out of that row and
+        // into the destination, or one destination is overvalued and the other undervalued.
+        await factory.ResetDatabaseAsync();
+        var cheap = await factory.SeedWarehouseAsync("VAL-CHEAP");
+        var dear = await factory.SeedWarehouseAsync("VAL-DEAR");
+        var cheapDestination = await factory.SeedWarehouseAsync("VAL-DEST1");
+        var dearDestination = await factory.SeedWarehouseAsync("VAL-DEST2");
+        var inTransit = await factory.SeedWarehouseAsync("VAL-IT2", WarehouseKind.InTransit);
+        var productId = await factory.SeedProductAsync("VAL-002");
+        await factory.SeedStockAsync(productId, cheap, 40, averageUnitCostCents: 100);
+        await factory.SeedStockAsync(productId, dear, 40, averageUnitCostCents: 300);
+        var manager = await factory.CreateClientAs(Role.WarehouseManager);
+        var ops = await factory.CreateClientAs(Role.Operator);
+
+        var fromCheap = await CreateTransferAsync(manager, cheap, cheapDestination, inTransit, productId, 40);
+        var fromDear = await CreateTransferAsync(manager, dear, dearDestination, inTransit, productId, 40);
+        await PostOkAsync(ops, $"/api/transfers/{fromCheap}/dispatch");
+        await PostOkAsync(ops, $"/api/transfers/{fromDear}/dispatch");
+
+        var before = await factory.TotalValuationAsync();
+        before.ShouldBe(40 * 100 + 40 * 300);
+        (await factory.ReadStockAsync(productId, inTransit)).AverageCost.ShouldBe(200);
+
+        await PostOkAsync(ops, $"/api/transfers/{fromCheap}/receive");
+
+        (await factory.ReadStockAsync(productId, cheapDestination)).AverageCost.ShouldBe(100);
+        (await factory.ReadStockAsync(productId, inTransit)).AverageCost.ShouldBe(300);
+        (await factory.TotalValuationAsync()).ShouldBe(before);
+
+        await PostOkAsync(ops, $"/api/transfers/{fromDear}/receive");
+
+        (await factory.ReadStockAsync(productId, dearDestination)).AverageCost.ShouldBe(300);
+        (await factory.ReadStockAsync(productId, inTransit)).OnHand.ShouldBe(0);
+        (await factory.TotalValuationAsync()).ShouldBe(before);
+    }
+
+    private static async Task PostOkAsync(HttpClient client, string route)
+    {
+        var response = await client.PostAsJsonAsync(route, new { idempotencyKey = $"val-{Guid.CreateVersion7()}" }, Ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
     private async Task WaitUntilSomeoneIsBlockedOnALockAsync(Task request)
     {
         await using var probe = new NpgsqlConnection(factory.ConnectionString);

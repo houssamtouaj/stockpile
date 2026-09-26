@@ -45,6 +45,14 @@ public interface IStockWriter
     Task<StockWriteResult> TryReleaseAsync(Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default);
     Task<StockWriteResult> TryIssueAsync(Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default);
     Task<StockWriteResult> TryReceiveAsync(Guid productId, Guid warehouseId, int quantity, long unitCostCents, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes units valued at <paramref name="unitCostCents"/> each, re-averaging what
+    /// remains: a transfer's outbound leg, which must give up exactly the value its inbound
+    /// leg adds. Refused like an adjustment if it would take on-hand below reserved.
+    /// </summary>
+    Task<StockWriteResult> TryWithdrawAtCostAsync(Guid productId, Guid warehouseId, int quantity, long unitCostCents, CancellationToken ct = default);
+
     Task<StockWriteResult> TryAdjustAsync(Guid productId, Guid warehouseId, int onHandDelta, CancellationToken ct = default);
     Task<StockWriteResult> TryCountAsync(Guid productId, Guid warehouseId, int observedOnHand, DateTimeOffset countedAt, CancellationToken ct = default);
 }

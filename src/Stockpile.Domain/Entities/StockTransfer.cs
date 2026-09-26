@@ -87,6 +87,26 @@ public sealed class StockTransfer : Entity
         return TransitionTo(TransferStatus.InTransit, FromWarehouseId, occurredAt);
     }
 
+    /// <summary>
+    /// Prices one line at the cost its units carried out of the source. Only meaningful as
+    /// part of dispatch, so it is refused in any other status.
+    /// </summary>
+    public Result RecordDispatchCost(Guid lineId, long unitCostCents)
+    {
+        if (Status != TransferStatus.InTransit)
+            return InvalidTransition(nameof(RecordDispatchCost));
+
+        if (unitCostCents < 0)
+            return new DomainRuleError("transfer.line_cost_invalid", "A unit cost cannot be negative.");
+
+        var line = _lines.SingleOrDefault(l => l.Id == lineId);
+        if (line is null)
+            return new NotFoundError("StockTransferLine", lineId);
+
+        line.RecordUnitCost(unitCostCents);
+        return Result.Ok();
+    }
+
     public Result Receive(DateTimeOffset occurredAt)
     {
         if (Status != TransferStatus.InTransit)

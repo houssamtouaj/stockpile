@@ -6,10 +6,12 @@ using Stockpile.Domain.Entities;
 
 namespace Stockpile.Application.Transfers.Commands;
 
+internal enum TransferStage { Dispatch, Receive }
+
 /// <summary>
 /// Moves every line of a transfer from one warehouse to another as a paired TransferOut /
-/// TransferIn, through the same mutation path every other stock change takes — no new SQL.
-/// Dispatch calls it From → InTransit; receipt calls it InTransit → To.
+/// TransferIn, through the same mutation path every other stock change takes. Dispatch
+/// calls it From → InTransit; receipt calls it InTransit → To.
 /// <para>
 /// Both legs of every line run inside the handler's one transaction, so a transfer can
 /// never half-happen. That is the mechanical reason total valuation is conserved
@@ -23,7 +25,7 @@ internal static class TransferLegs
         IStockWriter writer,
         IStockMutator mutator,
         StockTransfer transfer,
-        string stage,
+        TransferStage stage,
         Guid fromWarehouseId,
         Guid toWarehouseId,
         string idempotencyKey,
@@ -43,27 +45,35 @@ internal static class TransferLegs
 
         await writer.LockRowsAsync(rows, ct);
 
+        var stageName = stage == TransferStage.Dispatch ? "dispatch" : "receive";
+
         foreach (var line in transfer.Lines)
         {
-            // The cost the units carry as they move: read from the source, under the lock
-            // taken above, and used on the inbound leg, which is what conserves total
-            // valuation. The outbound leg leaves the source's average untouched, so the
-            // value removed there is exactly the value added here — up to the rounding of
-            // a blended average when the destination already holds the product at another
-            // cost, an accepted limitation of integer-cent weighted-average costing.
-            var unitCost = await db.StockItems
-                .AsNoTracking()
-                .Where(s => s.ProductId == line.ProductId && s.WarehouseId == fromWarehouseId)
-                .Select(s => (long?)s.AverageUnitCostCents)
-                .FirstOrDefaultAsync(ct) ?? 0;
+            // The cost the units carry, used on BOTH legs, so the value one row gives up is
+            // exactly the value the other gains. Dispatch prices them at the source's average
+            // — read under the lock above, so no receipt can move it between this read and
+            // the write — and records that on the line. Receipt reuses the recorded cost
+            // rather than the in-transit row's average, which blends every transfer of this
+            // product still on the road. A line dispatched before costs were recorded has
+            // none, and falls back to that average.
+            var unitCost = stage == TransferStage.Receive && line.UnitCostCents is { } recorded
+                ? recorded
+                : await AverageCostAsync(db, line.ProductId, fromWarehouseId, ct);
+
+            if (stage == TransferStage.Dispatch)
+            {
+                var priced = transfer.RecordDispatchCost(line.Id, unitCost);
+                if (priced.IsFailure)
+                    return priced.Error;
+            }
 
             var outbound = await mutator.ApplyAsync(
                 new StockMutationRequest(
                     line.ProductId, fromWarehouseId,
-                    DerivedIdempotencyKey.For(idempotencyKey, $"{stage}-out", line.Id),
+                    DerivedIdempotencyKey.For(idempotencyKey, $"{stageName}-out", line.Id),
                     nameof(StockTransfer), transfer.Id, Reason: null,
-                    Operation: $"tr-{stage}:out:{line.Quantity}"),
-                write: (w, c) => w.TryAdjustAsync(line.ProductId, fromWarehouseId, -line.Quantity, c),
+                    Operation: $"tr-{stageName}:out:{line.Quantity}"),
+                write: (w, c) => w.TryWithdrawAtCostAsync(line.ProductId, fromWarehouseId, line.Quantity, unitCost, c),
                 buildMovement: (context, write) => StockMovement.TransferOut(
                     context, line.Quantity, write.OnHandAfter, write.ReservedAfter),
                 onRefused: held => new InsufficientStockError(line.Quantity, held.Available),
@@ -75,9 +85,9 @@ internal static class TransferLegs
             var inbound = await mutator.ApplyAsync(
                 new StockMutationRequest(
                     line.ProductId, toWarehouseId,
-                    DerivedIdempotencyKey.For(idempotencyKey, $"{stage}-in", line.Id),
+                    DerivedIdempotencyKey.For(idempotencyKey, $"{stageName}-in", line.Id),
                     nameof(StockTransfer), transfer.Id, Reason: null,
-                    Operation: $"tr-{stage}:in:{line.Quantity}"),
+                    Operation: $"tr-{stageName}:in:{line.Quantity}"),
                 write: (w, c) => w.TryReceiveAsync(line.ProductId, toWarehouseId, line.Quantity, unitCost, c),
                 buildMovement: (context, write) => StockMovement.TransferIn(
                     context, line.Quantity, unitCost, write.OnHandAfter, write.ReservedAfter),
@@ -91,4 +101,12 @@ internal static class TransferLegs
 
         return Result.Ok();
     }
+
+    private static async Task<long> AverageCostAsync(
+        IAppDbContext db, Guid productId, Guid warehouseId, CancellationToken ct) =>
+        await db.StockItems
+            .AsNoTracking()
+            .Where(s => s.ProductId == productId && s.WarehouseId == warehouseId)
+            .Select(s => (long?)s.AverageUnitCostCents)
+            .FirstOrDefaultAsync(ct) ?? 0;
 }

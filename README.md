@@ -133,10 +133,23 @@ mechanical reason total valuation is conserved mid-flight: at every moment each 
 exactly one stock row, at one cost. `TransferTests.DispatchThenReceive_conservesTotalValuation`
 checks it before dispatch, in flight and after receipt.
 
-The cost a unit carries is the source's weighted average, read just before the outbound leg.
-Two known imprecisions come with integer-cent weighted-average costing: a receipt that lands at
-the source concurrently can make that figure marginally stale, and blending into a destination
-that already holds the product at a different cost rounds the new average to the nearest cent.
+The cost a unit carries is the source's weighted average, read at dispatch **under the same row
+lock as the outbound write**, so a receipt landing at the source cannot move the average between
+the read and the write. That cost is recorded on the transfer line, and receipt moves the units
+out of the in-transit warehouse and into the destination at exactly that cost — not at the
+in-transit row's average, which blends every transfer of the product still on the road. Each
+outbound leg re-averages what it leaves behind, so every step gives up exactly the value the next
+one gains; `TransferValuationTests` covers both the race and two transfers in flight at different
+costs. One imprecision remains, inherent to integer-cent weighted-average costing: blending into
+a row that already holds the product at a different cost rounds the new average to the nearest
+cent.
+
+Every command that writes several stock rows locks all of them up front, in one statement and
+in id order, so two such commands can never each hold a row the other needs next.
+`LockOrderingTests` races confirms with opposite line orders and crossed dispatch/receive pairs
+through the shared in-transit row. Should Postgres still pick a deadlock victim, the command is
+rolled back and retried; one that loses every retry is answered `409 concurrency.retryable`,
+never a 500.
 
 ## Not in scope
 
@@ -145,9 +158,9 @@ reversing an in-transit transfer are deliberate exclusions, not omissions. The r
 each will be recorded here as the phase that meets it lands.
 
 - **Cancelling a dispatched transfer** is refused (`transfer.cannot_cancel_after_dispatch`)
-  rather than implemented. Undoing a dispatch means inventing compensating movements whose
-  cost basis is ambiguous once the in-transit average has blended with other transfers. The
-  honest operational answer is the one the error gives: receive it at the destination, then
-  transfer it back.
+  rather than implemented. Undoing a dispatch means inventing compensating movements back
+  into a source whose stock and average have usually moved on since the units left. The honest
+  operational answer is the one the error gives: receive it at the destination, then transfer
+  it back.
 - **Returns on shipped sales orders** are not modelled; cancelling a shipped order is refused
   with `so.already_shipped`.

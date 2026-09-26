@@ -62,6 +62,11 @@ internal sealed class StockWriter(AppDbContext db) : IStockWriter
         ExecuteAsync(StockSql.Receive, productId, warehouseId, ct,
             ("quantity", quantity), ("unit_cost_cents", unitCostCents));
 
+    public Task<StockWriteResult> TryWithdrawAtCostAsync(
+        Guid productId, Guid warehouseId, int quantity, long unitCostCents, CancellationToken ct = default) =>
+        ExecuteAsync(StockSql.WithdrawAtCost, productId, warehouseId, ct,
+            ("quantity", quantity), ("unit_cost_cents", unitCostCents));
+
     public Task<StockWriteResult> TryAdjustAsync(
         Guid productId, Guid warehouseId, int onHandDelta, CancellationToken ct = default) =>
         ExecuteAsync(StockSql.Adjust, productId, warehouseId, ct,

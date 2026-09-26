@@ -135,6 +135,33 @@ public class StockWriterTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task WithdrawAtCost_reAveragesWhatRemains()
+    {
+        // 20 at 200 = 4000; take 10 valued at 100 = 1000; 3000 / 10 = 300.
+        var (productId, warehouseId) = await ArrangeAsync(onHand: 20, cost: 200);
+
+        var result = await factory.WithWriterAsync((w, _) =>
+            w.TryWithdrawAtCostAsync(productId, warehouseId, 10, 100, Ct));
+
+        result.OnHandAfter.ShouldBe(10);
+        result.PreviousOnHand.ShouldBe(20);
+        (await factory.ReadStockAsync(productId, warehouseId)).AverageCost.ShouldBe(300);
+    }
+
+    [Fact]
+    public async Task WithdrawAtCost_belowReserved_isRefused()
+    {
+        var (productId, warehouseId) = await ArrangeAsync(onHand: 10);
+        await factory.WithWriterAsync((w, _) => w.TryReserveAsync(productId, warehouseId, 8, Ct));
+
+        var result = await factory.WithWriterAsync((w, _) =>
+            w.TryWithdrawAtCostAsync(productId, warehouseId, 5, 1000, Ct));
+
+        result.IsInsufficient.ShouldBeTrue();
+        (await factory.ReadStockAsync(productId, warehouseId)).OnHand.ShouldBe(10);
+    }
+
+    [Fact]
     public async Task Adjust_downwardBelowReserved_isRefused()
     {
         var (productId, warehouseId) = await ArrangeAsync(onHand: 10);

@@ -177,4 +177,47 @@ public class StockTransferTests
         transfer.DomainEvents.OfType<Events.OrderStatusChangedEvent>()
             .ShouldContain(e => e.ToStatus == "InTransit");
     }
+
+    [Fact]
+    public void RecordDispatchCost_onceDispatched_pricesTheLine()
+    {
+        // The cost travels with the line so the receipt can move exactly this value out of
+        // the in-transit row, whatever else is in flight there.
+        var transfer = Build();
+        transfer.Dispatch(Now);
+        var line = transfer.Lines.Single();
+
+        transfer.RecordDispatchCost(line.Id, 250).IsSuccess.ShouldBeTrue();
+
+        line.UnitCostCents.ShouldBe(250);
+    }
+
+    [Fact]
+    public void RecordDispatchCost_beforeDispatch_fails()
+    {
+        var transfer = Build();
+
+        transfer.RecordDispatchCost(transfer.Lines.Single().Id, 250)
+            .Error!.Code.ShouldBe("transfer.invalid_transition");
+        transfer.Lines.Single().UnitCostCents.ShouldBeNull();
+    }
+
+    [Fact]
+    public void RecordDispatchCost_negative_fails()
+    {
+        var transfer = Build();
+        transfer.Dispatch(Now);
+
+        transfer.RecordDispatchCost(transfer.Lines.Single().Id, -1)
+            .Error!.Code.ShouldBe("transfer.line_cost_invalid");
+    }
+
+    [Fact]
+    public void RecordDispatchCost_forAnUnknownLine_fails()
+    {
+        var transfer = Build();
+        transfer.Dispatch(Now);
+
+        transfer.RecordDispatchCost(Guid.CreateVersion7(), 250).Error!.Code.ShouldBe("not_found");
+    }
 }

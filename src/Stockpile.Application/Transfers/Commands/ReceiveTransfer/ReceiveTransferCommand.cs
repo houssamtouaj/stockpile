@@ -47,7 +47,7 @@ public sealed class ReceiveTransferHandler(
 
         var moved = await TransferLegs.MoveAsync(
             db, writer, mutator, transfer,
-            stage: "receive",
+            stage: TransferStage.Receive,
             fromWarehouseId: transfer.InTransitWarehouseId,
             toWarehouseId: transfer.ToWarehouseId,
             command.IdempotencyKey,

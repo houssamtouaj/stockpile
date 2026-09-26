@@ -47,7 +47,7 @@ public sealed class DispatchTransferHandler(
 
         var moved = await TransferLegs.MoveAsync(
             db, writer, mutator, transfer,
-            stage: "dispatch",
+            stage: TransferStage.Dispatch,
             fromWarehouseId: transfer.FromWarehouseId,
             toWarehouseId: transfer.InTransitWarehouseId,
             command.IdempotencyKey,

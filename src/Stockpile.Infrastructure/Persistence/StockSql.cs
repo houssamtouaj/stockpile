@@ -118,6 +118,37 @@ internal static class StockSql
         """ + Tail;
 
     /// <summary>
+    /// A transfer's outbound leg: the Adjust precondition, plus the receipt's weighted
+    /// average run backwards. Removing q units at a known cost leaves the rest valued at
+    /// (value - q x cost) / (on_hand - q), so the row gives up exactly the value the inbound
+    /// leg adds. When the cost IS the row's average — every dispatch — the average is
+    /// unchanged; out of an in-transit row blending several transfers, each receipt takes
+    /// its own transfer's value and leaves the others' behind. GREATEST(0, ...) only guards
+    /// against rounding drift: a correct ledger never asks for more value than the row holds.
+    /// </summary>
+    public static readonly string WithdrawAtCost = Target + """
+        updated AS (
+            UPDATE stock_items s
+            SET quantity_on_hand = s.quantity_on_hand - @quantity,
+                average_unit_cost_cents = CASE
+                    WHEN s.quantity_on_hand - @quantity <= 0
+                        THEN s.average_unit_cost_cents
+                    ELSE GREATEST(0, ROUND(
+                        ((s.average_unit_cost_cents::numeric * s.quantity_on_hand)
+                         - (@unit_cost_cents::numeric * @quantity))
+                        / (s.quantity_on_hand - @quantity)
+                    ))::bigint
+                END
+            WHERE s.product_id = @product_id
+              AND s.warehouse_id = @warehouse_id
+              AND s.quantity_on_hand - @quantity >= 0
+              AND s.quantity_on_hand - @quantity >= s.quantity_reserved
+            RETURNING s.quantity_on_hand, s.quantity_reserved,
+                      s.quantity_on_hand + @quantity AS previous_on_hand
+        )
+        """ + Tail;
+
+    /// <summary>
     /// Signed adjustment with a reason. Refuses any delta that would take on-hand below
     /// zero or below the reserved quantity — reserved units are promised to an order and
     /// cannot be adjusted away without releasing them first.
