@@ -47,6 +47,16 @@ public sealed record ConcurrencyConflictError(string EntityType, Guid Id)
     : Error("concurrency.conflict",
             $"{EntityType} '{Id}' was modified by someone else. Reload and retry.");
 
+/// <summary>
+/// The request collided with concurrent ones — a deadlock or serialization failure that
+/// survived every retry — and was rolled back whole. Nothing was applied, so sending the
+/// identical request again is safe. Maps to 409; the code tells a client it may retry.
+/// </summary>
+public sealed record TransientConflictError()
+    : Error("concurrency.retryable",
+            "The request collided with concurrent requests and was rolled back without effect. "
+            + "Retry it unchanged.");
+
 public sealed record ValidationFailedError(IReadOnlyDictionary<string, string[]> Failures)
     : Error("validation.failed", "One or more fields are invalid.");
 

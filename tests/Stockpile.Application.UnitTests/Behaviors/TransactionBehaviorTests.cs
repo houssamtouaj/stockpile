@@ -135,6 +135,56 @@ public class TransactionBehaviorTests
     }
 
     [Fact]
+    public async Task TransientConflict_discardsTheAttemptsNotifications_andRetries()
+    {
+        // A deadlock victim was rolled back whole; running it again is the right answer,
+        // and whatever the victim queued describes state that never committed.
+        var attempts = 0;
+
+        _unitOfWork
+            .ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task<Result>>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                if (++attempts < 3)
+                    throw new TransientConflictException("40P01", new Exception("deadlock detected"));
+
+                return call.Arg<Func<CancellationToken, Task<Result>>>()(CancellationToken.None);
+            });
+
+        var behavior = new TransactionBehavior<TestCommand, Result>(_unitOfWork, _notifications);
+
+        var response = await behavior.Handle(
+            new TestCommand(), _ => Task.FromResult(Result.Ok()), CancellationToken.None);
+
+        response.IsSuccess.ShouldBeTrue();
+        attempts.ShouldBe(3);
+        _notifications.Received(2).Clear();
+        await _notifications.Received(1).FlushAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TransientConflict_isRetriedABoundedNumberOfTimes_thenSurfaces()
+    {
+        var attempts = 0;
+
+        _unitOfWork
+            .ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task<Result>>>(), Arg.Any<CancellationToken>())
+            .Returns<Task<Result>>(_ =>
+            {
+                attempts++;
+                throw new TransientConflictException("40001", new Exception("could not serialize access"));
+            });
+
+        var behavior = new TransactionBehavior<TestCommand, Result>(_unitOfWork, _notifications);
+
+        await Should.ThrowAsync<TransientConflictException>(() =>
+            behavior.Handle(new TestCommand(), _ => Task.FromResult(Result.Ok()), CancellationToken.None));
+
+        attempts.ShouldBe(TransactionBehavior<TestCommand, Result>.MaxAttemptsOnTransientConflict);
+        await _notifications.DidNotReceive().FlushAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Notifications_areDiscarded_whenTheHandlerThrows()
     {
         _unitOfWork

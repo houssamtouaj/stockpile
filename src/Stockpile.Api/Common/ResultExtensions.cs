@@ -78,6 +78,10 @@ public static class ResultExtensions
         // mutation goes missing with nothing recorded anywhere.
         IdempotencyKeyReusedError => (StatusCodes.Status409Conflict, "Conflict"),
 
+        // Rolled back by a deadlock or serialization failure that outlasted the retries.
+        // A concurrency outcome, not a fault — the request was valid and may be resent.
+        TransientConflictError => (StatusCodes.Status409Conflict, "Conflict"),
+
         // §6: insufficient stock is a correct refusal, not a conflict. 422, never 409.
         InsufficientStockError => (StatusCodes.Status422UnprocessableEntity, "Insufficient stock"),
 

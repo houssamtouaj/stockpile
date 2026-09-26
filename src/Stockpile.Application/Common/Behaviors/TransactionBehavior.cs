@@ -26,6 +26,8 @@ public sealed class TransactionBehavior<TRequest, TResponse>(
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : notnull
 {
+    public const int MaxAttemptsOnTransientConflict = 3;
+
     public async Task<TResponse> Handle(
         TRequest request, RequestHandlerDelegate<TResponse> next, CancellationToken cancellationToken)
     {
@@ -35,27 +37,42 @@ public sealed class TransactionBehavior<TRequest, TResponse>(
         TResponse response;
         try
         {
-            try
-            {
-                response = await unitOfWork.ExecuteInTransactionAsync(
-                    async ct => await next(ct), cancellationToken);
-            }
-            catch (IdempotencyReplayException)
-            {
-                // The transaction rolled back, so anything the losing attempt queued
-                // describes state that was never committed. Dropping it is the same rule
-                // the flush-after-commit ordering exists to enforce; without it, every
-                // loser of an idempotency race would broadcast a phantom quantity once
-                // phase 04 puts a real transport behind FlushAsync.
-                notifications.Clear();
+            var replayed = false;
+            var attempts = 0;
 
-                // Replayed exactly once. The winner is committed by now, so the handler's
-                // idempotency fast path finds its movement and returns the recorded
-                // after-values. A second IdempotencyReplayException would mean the fast
-                // path cannot see a row the unique index says exists — a real fault, and
-                // it is left to propagate as one.
-                response = await unitOfWork.ExecuteInTransactionAsync(
-                    async ct => await next(ct), cancellationToken);
+            while (true)
+            {
+                attempts++;
+                try
+                {
+                    response = await unitOfWork.ExecuteInTransactionAsync(
+                        async ct => await next(ct), cancellationToken);
+                    break;
+                }
+                catch (IdempotencyReplayException) when (!replayed)
+                {
+                    // The transaction rolled back, so anything the losing attempt queued
+                    // describes state that was never committed. Dropping it is the same rule
+                    // the flush-after-commit ordering exists to enforce; without it, every
+                    // loser of an idempotency race would broadcast a phantom quantity once
+                    // phase 04 puts a real transport behind FlushAsync.
+                    notifications.Clear();
+
+                    // Replayed exactly once. The winner is committed by now, so the handler's
+                    // idempotency fast path finds its movement and returns the recorded
+                    // after-values. A second IdempotencyReplayException would mean the fast
+                    // path cannot see a row the unique index says exists — a real fault, and
+                    // it is left to propagate as one.
+                    replayed = true;
+                }
+                catch (TransientConflictException) when (attempts < MaxAttemptsOnTransientConflict)
+                {
+                    // A deadlock victim or serialization failure, rolled back whole. Lock
+                    // ordering makes this rare; retrying is the backstop for what remains.
+                    // Same rule as above: the dead attempt's notifications never happened.
+                    // Out of attempts, it propagates and the API answers 409, retryable.
+                    notifications.Clear();
+                }
             }
         }
         catch

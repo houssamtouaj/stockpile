@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
+using Stockpile.Application.Common.Exceptions;
 using Stockpile.Infrastructure.Persistence;
 
 namespace Stockpile.Api.IntegrationTests;
@@ -19,12 +20,14 @@ internal static class FaultProbeEndpoints
 {
     public const string StockInvariantRoute = "/test/fault/stock-invariant";
     public const string UnexpectedRoute = "/test/fault/unexpected";
+    public const string TransientConflictRoute = "/test/fault/transient-conflict";
 
     public const string ConstraintName = "stock_never_negative";
 
     public static EndpointDataSource DataSource { get; } = new DefaultEndpointDataSource(
     [
         Throws(StockInvariantRoute, () => new StockInvariantViolatedException(ConstraintName)),
+        Throws(TransientConflictRoute, () => new TransientConflictException("40P01", new Exception("probe: deadlock"))),
         Throws(UnexpectedRoute, () => new InvalidOperationException("probe: unmapped failure"))
     ]);
 

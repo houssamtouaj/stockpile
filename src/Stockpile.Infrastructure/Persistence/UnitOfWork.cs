@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Stockpile.Application.Common.Exceptions;
 using Stockpile.Application.Common.Interfaces;
@@ -32,6 +33,27 @@ public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
         // retrying strategy throws at runtime with a message most people have to search for.
         var strategy = db.Database.CreateExecutionStrategy();
 
+        try
+        {
+            return await ExecuteOnceAsync(strategy, operation, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransientConflict(ex, out var sqlState))
+        {
+            // Postgres chose this transaction as a deadlock victim, or refused to serialize
+            // it. The transaction was rolled back as it was disposed on the way out, so
+            // nothing it wrote survives; the tracked entities describe that dead attempt and
+            // must not leak into the retry. TransactionBehavior re-runs the operation, the
+            // same way it replays a lost idempotency race.
+            db.ChangeTracker.Clear();
+            throw new TransientConflictException(sqlState, ex);
+        }
+    }
+
+    private async Task<T> ExecuteOnceAsync<T>(
+        IExecutionStrategy strategy,
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
         return await strategy.ExecuteAsync(async ct =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -86,6 +108,27 @@ public sealed class UnitOfWork(AppDbContext db) : IUnitOfWork
 
             return result;
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// 40P01 (deadlock_detected) or 40001 (serialization_failure), wherever it sits in the
+    /// chain: raised directly by a raw stock statement, inside the DbUpdateException of a
+    /// failed flush, or inside the InvalidOperationException Npgsql's execution strategy
+    /// wraps anything transient in ("likely due to a transient failure").
+    /// </summary>
+    private static bool IsTransientConflict(Exception exception, out string sqlState)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException { SqlState: "40P01" or "40001" } pg)
+            {
+                sqlState = pg.SqlState;
+                return true;
+            }
+        }
+
+        sqlState = string.Empty;
+        return false;
     }
 
     private static bool IsIdempotencyReplay(DbUpdateException exception, out string constraint)

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Stockpile.Application.Common.Exceptions;
 using Stockpile.Domain.Common;
 using Stockpile.Infrastructure.Persistence;
 
@@ -56,6 +57,19 @@ internal sealed class StockpileExceptionHandler(ILogger<StockpileExceptionHandle
                 .ToProblem()
                 .ExecuteAsync(httpContext);
 
+            return true;
+        }
+
+        if (exception is TransientConflictException transient)
+        {
+            // Every retry in TransactionBehavior collided too. Warning, not Error: nothing
+            // is broken, and the client has been told to send the request again.
+            logger.LogWarning(
+                exception,
+                "Transient conflict (SQLSTATE {SqlState}) outlasted the retries. {Method} {Path}",
+                transient.SqlState, httpContext.Request.Method, httpContext.Request.Path);
+
+            await new TransientConflictError().ToProblem().ExecuteAsync(httpContext);
             return true;
         }
 

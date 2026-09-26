@@ -60,6 +60,24 @@ public class ProblemDetailsTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task TransientConflictAfterRetries_returns409_withARetryableErrorCode()
+    {
+        // Reached only when a deadlock or serialization failure survives every retry. The
+        // request was rolled back whole, so the honest answer is "send it again", not 500.
+        var ct = TestContext.Current.CancellationToken;
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync(FaultProbeEndpoints.TransientConflictRoute, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("application/problem+json");
+
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errorCode").GetString().ShouldBe("concurrency.retryable");
+        problem.GetProperty("detail").GetString()!.ShouldNotContain("probe:");
+    }
+
+    [Fact]
     public async Task UnmappedException_returns500_asAProblemDocument_withoutLeakingTheMessage()
     {
         var ct = TestContext.Current.CancellationToken;
