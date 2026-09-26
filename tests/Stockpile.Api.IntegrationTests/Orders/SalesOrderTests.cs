@@ -255,6 +255,67 @@ public class SalesOrderTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Ship_replayedWithTheSameKey_issuesOnce()
+    {
+        var f = await ArrangeAsync();
+        var id = await PackAnOrderAsync(f);
+        var key = $"ship-{Guid.CreateVersion7()}";
+
+        var first = await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/ship", new { idempotencyKey = key }, Ct);
+        var retry = await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/ship", new { idempotencyKey = key }, Ct);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        retry.StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.UnprocessableEntity);
+        (await factory.ReadStockAsync(f.ProductA, f.WarehouseId)).OnHand.ShouldBe(95);
+        (await MovementsAsync(id, MovementType.Issue)).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Cancel_replayedWithTheSameKey_releasesOnce()
+    {
+        var f = await ArrangeAsync();
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 5, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+        var key = $"canc-{Guid.CreateVersion7()}";
+
+        var first = await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/cancel", new { idempotencyKey = key }, Ct);
+        var retry = await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/cancel", new { idempotencyKey = key }, Ct);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        retry.StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.UnprocessableEntity);
+        (await factory.ReadStockAsync(f.ProductA, f.WarehouseId)).Reserved.ShouldBe(0);
+        (await MovementsAsync(id, MovementType.ReservationRelease)).ShouldBe(2);
+    }
+
+    private async Task<Guid> PackAnOrderAsync(Fixture f)
+    {
+        var id = await CreateAsync(f.Manager, CreateBody(f, qtyA: 5, qtyB: 3));
+        await f.Manager.PostAsJsonAsync($"/api/sales-orders/{id}/confirm",
+            new { idempotencyKey = $"conf-{Guid.CreateVersion7()}" }, Ct);
+
+        var detail = await f.Manager.GetFromJsonAsync<JsonElement>($"/api/sales-orders/{id}", Ct);
+        foreach (var line in detail.GetProperty("lines").EnumerateArray())
+        {
+            await f.Operator.PostAsJsonAsync($"/api/sales-orders/{id}/pick", new
+            {
+                lineId = line.GetProperty("id").GetGuid(),
+                quantity = line.GetProperty("quantityOrdered").GetInt32()
+            }, Ct);
+        }
+
+        (await f.Operator.PostAsync($"/api/sales-orders/{id}/pack", null, Ct)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        return id;
+    }
+
+    private async Task<int> MovementsAsync(Guid orderId, MovementType type)
+    {
+        using var scope = factory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.StockMovements.CountAsync(m => m.ReferenceId == orderId && m.Type == type, Ct);
+    }
+
+    [Fact]
     public async Task Pick_retriedWithTheSameKey_countsTheUnitsOnce()
     {
         // The response to a partial pick is lost and the client retries. Counted twice, the

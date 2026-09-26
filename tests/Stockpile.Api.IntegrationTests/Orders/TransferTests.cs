@@ -137,6 +137,49 @@ public class TransferTests(StockpileApiFactory factory)
     }
 
     [Fact]
+    public async Task Dispatch_replayedWithTheSameKey_movesOnce()
+    {
+        var f = await ArrangeAsync(stockAtSource: 100);
+        var id = await CreateAsync(f, quantity: 40);
+        var key = $"disp-{Guid.CreateVersion7()}";
+
+        var first = await f.Operator.PostAsJsonAsync($"/api/transfers/{id}/dispatch", new { idempotencyKey = key }, Ct);
+        var retry = await f.Operator.PostAsJsonAsync($"/api/transfers/{id}/dispatch", new { idempotencyKey = key }, Ct);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        retry.StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.UnprocessableEntity);
+        (await factory.ReadStockAsync(f.ProductId, f.From)).OnHand.ShouldBe(60);
+        (await factory.ReadStockAsync(f.ProductId, f.InTransit)).OnHand.ShouldBe(40);
+        (await MovementCountAsync(id)).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Receive_replayedWithTheSameKey_movesOnce()
+    {
+        var f = await ArrangeAsync(stockAtSource: 100);
+        var id = await CreateAsync(f, quantity: 40);
+        await f.Operator.PostAsJsonAsync($"/api/transfers/{id}/dispatch",
+            new { idempotencyKey = $"disp-{Guid.CreateVersion7()}" }, Ct);
+        var key = $"recv-{Guid.CreateVersion7()}";
+
+        var first = await f.Operator.PostAsJsonAsync($"/api/transfers/{id}/receive", new { idempotencyKey = key }, Ct);
+        var retry = await f.Operator.PostAsJsonAsync($"/api/transfers/{id}/receive", new { idempotencyKey = key }, Ct);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        retry.StatusCode.ShouldBeOneOf(HttpStatusCode.OK, HttpStatusCode.UnprocessableEntity);
+        (await factory.ReadStockAsync(f.ProductId, f.InTransit)).OnHand.ShouldBe(0);
+        (await factory.ReadStockAsync(f.ProductId, f.To)).OnHand.ShouldBe(40);
+        (await MovementCountAsync(id)).ShouldBe(4);
+    }
+
+    private async Task<int> MovementCountAsync(Guid transferId)
+    {
+        using var scope = factory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.StockMovements.CountAsync(m => m.ReferenceId == transferId, Ct);
+    }
+
+    [Fact]
     public async Task Cancel_beforeDispatch_succeeds()
     {
         var f = await ArrangeAsync();
