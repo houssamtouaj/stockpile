@@ -26,6 +26,21 @@ public sealed record StockWriteResult(
 public interface IStockWriter
 {
     Task EnsureStockItemAsync(Guid productId, Guid warehouseId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Row-locks every existing stock row in <paramref name="rows"/> in one statement, in id
+    /// order. A command that writes more than one row calls this before its first write, so
+    /// every such command acquires its locks in the same global order and no two of them can
+    /// each hold a row the other is waiting for. Walking lines in load order is what let two
+    /// confirms with lines [A,B] and [B,A] — or a dispatch W1 → W2 and a receipt W2 → W1,
+    /// which share the in-transit row — deadlock.
+    /// <para>
+    /// A pairing with no row is skipped rather than created: the write that follows reports
+    /// it as missing, exactly as it would have without the lock.
+    /// </para>
+    /// </summary>
+    Task LockRowsAsync(IReadOnlyCollection<(Guid ProductId, Guid WarehouseId)> rows, CancellationToken ct = default);
+
     Task<StockWriteResult> TryReserveAsync(Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default);
     Task<StockWriteResult> TryReleaseAsync(Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default);
     Task<StockWriteResult> TryIssueAsync(Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default);

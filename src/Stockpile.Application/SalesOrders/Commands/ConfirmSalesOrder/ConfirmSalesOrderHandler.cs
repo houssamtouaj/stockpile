@@ -11,6 +11,7 @@ namespace Stockpile.Application.SalesOrders.Commands.ConfirmSalesOrder;
 
 public sealed class ConfirmSalesOrderHandler(
     IAppDbContext db,
+    IStockWriter writer,
     IStockMutator mutator,
     IClock clock,
     INotificationPublisher notifications) : IRequestHandler<ConfirmSalesOrderCommand, Result<SalesOrderDto>>
@@ -28,6 +29,11 @@ public sealed class ConfirmSalesOrderHandler(
         var transition = order.Confirm(clock.UtcNow);
         if (transition.IsFailure)
             return transition.Error;
+
+        // Every row this command writes, locked in one global order before the first write,
+        // so two orders sharing products in opposite line order cannot deadlock.
+        await writer.LockRowsAsync(
+            order.Lines.Select(l => (l.ProductId, order.WarehouseId)).ToList(), cancellationToken);
 
         // One reservation per line. Any refusal returns immediately; the ambient
         // transaction rolls back every reservation already applied, so confirm is

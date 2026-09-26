@@ -29,15 +29,28 @@ internal static class TransferLegs
         string idempotencyKey,
         CancellationToken ct)
     {
+        // Every row either leg writes. Created first, in one fixed order so two commands
+        // creating the same rows cannot wait on each other's inserts; then locked together
+        // in id order before anything is written. Locking leg by leg is what let a dispatch
+        // W1 → W2 and a receipt W2 → W1 deadlock on the in-transit row they share.
+        var rows = transfer.Lines
+            .SelectMany(l => new[] { (l.ProductId, fromWarehouseId), (l.ProductId, toWarehouseId) })
+            .Order()
+            .ToList();
+
+        foreach (var (productId, warehouseId) in rows)
+            await writer.EnsureStockItemAsync(productId, warehouseId, ct);
+
+        await writer.LockRowsAsync(rows, ct);
+
         foreach (var line in transfer.Lines)
         {
-            // The cost the units carry as they move: read from the source BEFORE the
-            // outbound write, and used on the inbound leg, which is what conserves total
+            // The cost the units carry as they move: read from the source, under the lock
+            // taken above, and used on the inbound leg, which is what conserves total
             // valuation. The outbound leg leaves the source's average untouched, so the
             // value removed there is exactly the value added here — up to the rounding of
             // a blended average when the destination already holds the product at another
-            // cost. A concurrent receipt at the source can make this figure slightly stale;
-            // both are accepted limitations of integer-cent weighted-average costing.
+            // cost, an accepted limitation of integer-cent weighted-average costing.
             var unitCost = await db.StockItems
                 .AsNoTracking()
                 .Where(s => s.ProductId == line.ProductId && s.WarehouseId == fromWarehouseId)
@@ -58,8 +71,6 @@ internal static class TransferLegs
 
             if (outbound.IsFailure)
                 return outbound.Error;
-
-            await writer.EnsureStockItemAsync(line.ProductId, toWarehouseId, ct);
 
             var inbound = await mutator.ApplyAsync(
                 new StockMutationRequest(

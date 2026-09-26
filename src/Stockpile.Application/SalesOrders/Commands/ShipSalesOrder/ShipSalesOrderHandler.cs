@@ -11,6 +11,7 @@ namespace Stockpile.Application.SalesOrders.Commands.ShipSalesOrder;
 
 public sealed class ShipSalesOrderHandler(
     IAppDbContext db,
+    IStockWriter writer,
     IStockMutator mutator,
     IClock clock,
     INotificationPublisher notifications) : IRequestHandler<ShipSalesOrderCommand, Result<SalesOrderDto>>
@@ -28,6 +29,11 @@ public sealed class ShipSalesOrderHandler(
         var transition = order.Ship(clock.UtcNow);
         if (transition.IsFailure)
             return transition.Error;
+
+        // Every row this command writes, locked in one global order before the first write,
+        // so two orders sharing products in opposite line order cannot deadlock.
+        await writer.LockRowsAsync(
+            order.Lines.Select(l => (l.ProductId, order.WarehouseId)).ToList(), cancellationToken);
 
         // Shipping consumes the reservation and the on-hand stock together, so each Issue
         // movement carries BOTH deltas negative.

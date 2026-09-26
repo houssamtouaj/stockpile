@@ -29,6 +29,19 @@ internal sealed class StockWriter(AppDbContext db) : IStockWriter
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task LockRowsAsync(
+        IReadOnlyCollection<(Guid ProductId, Guid WarehouseId)> rows, CancellationToken ct = default)
+    {
+        if (rows.Count == 0)
+            return;
+
+        await using var command = await CreateCommandAsync(StockSql.LockRows, ct);
+        command.Parameters.AddWithValue("product_ids", rows.Select(r => r.ProductId).ToArray());
+        command.Parameters.AddWithValue("warehouse_ids", rows.Select(r => r.WarehouseId).ToArray());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public Task<StockWriteResult> TryReserveAsync(
         Guid productId, Guid warehouseId, int quantity, CancellationToken ct = default) =>
         ExecuteAsync(StockSql.Reserve, productId, warehouseId, ct,

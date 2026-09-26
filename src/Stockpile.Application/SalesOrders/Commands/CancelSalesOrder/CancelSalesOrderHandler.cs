@@ -15,6 +15,7 @@ namespace Stockpile.Application.SalesOrders.Commands.CancelSalesOrder;
 /// </summary>
 public sealed class CancelSalesOrderHandler(
     IAppDbContext db,
+    IStockWriter writer,
     IStockMutator mutator,
     INotificationPublisher notifications) : IRequestHandler<CancelSalesOrderCommand, Result<SalesOrderDto>>
 {
@@ -31,6 +32,11 @@ public sealed class CancelSalesOrderHandler(
         var cancellation = order.Cancel();
         if (cancellation.IsFailure)
             return cancellation.Error;
+
+        // Every row this command writes, locked in one global order before the first write,
+        // so two orders sharing products in opposite line order cannot deadlock.
+        await writer.LockRowsAsync(
+            cancellation.Value.Select(l => (l.ProductId, order.WarehouseId)).ToList(), cancellationToken);
 
         foreach (var line in cancellation.Value)
         {

@@ -39,6 +39,18 @@ internal static class StockSql
         ON CONFLICT (product_id, warehouse_id) DO NOTHING;
         """;
 
+    /// <summary>
+    /// Locks a set of rows in id order. The sort sits below the lock in the plan, so rows
+    /// are locked as they come out of the ORDER BY — which is what makes the order global.
+    /// </summary>
+    public const string LockRows = """
+        SELECT id FROM stock_items
+        WHERE (product_id, warehouse_id) IN (
+            SELECT * FROM unnest(@product_ids::uuid[], @warehouse_ids::uuid[]))
+        ORDER BY id
+        FOR UPDATE;
+        """;
+
     /// <summary>Hold stock for an order. Moves reserved only; on-hand is untouched.</summary>
     public static readonly string Reserve = Target + """
         updated AS (
