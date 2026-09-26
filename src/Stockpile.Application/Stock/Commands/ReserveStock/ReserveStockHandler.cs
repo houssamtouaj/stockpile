@@ -1,16 +1,22 @@
 using MediatR;
+using Stockpile.Application.Common.Interfaces;
 using Stockpile.Application.Common.Stock;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.Entities;
 
 namespace Stockpile.Application.Stock.Commands.ReserveStock;
 
-public sealed class ReserveStockHandler(IStockMutator mutator)
+public sealed class ReserveStockHandler(IAppDbContext db, IStockMutator mutator)
     : IRequestHandler<ReserveStockCommand, Result<StockMutationOutcome>>
 {
-    public Task<Result<StockMutationOutcome>> Handle(
-        ReserveStockCommand command, CancellationToken cancellationToken) =>
-        mutator.ApplyAsync(
+    public async Task<Result<StockMutationOutcome>> Handle(
+        ReserveStockCommand command, CancellationToken cancellationToken)
+    {
+        if (await PhysicalWarehouseGuard.RefuseIfNotPhysicalAsync(db, command.WarehouseId, cancellationToken)
+            is { } refused)
+            return refused;
+
+        return await mutator.ApplyAsync(
             new StockMutationRequest(
                 command.ProductId,
                 command.WarehouseId,
@@ -27,4 +33,5 @@ public sealed class ReserveStockHandler(IStockMutator mutator)
             onRefused: held =>
                 new InsufficientStockError(command.Quantity, held.Available),
             cancellationToken);
+    }
 }

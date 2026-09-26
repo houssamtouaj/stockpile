@@ -1,16 +1,22 @@
 using MediatR;
+using Stockpile.Application.Common.Interfaces;
 using Stockpile.Application.Common.Stock;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.Entities;
 
 namespace Stockpile.Application.Stock.Commands.ReleaseStock;
 
-public sealed class ReleaseStockHandler(IStockMutator mutator)
+public sealed class ReleaseStockHandler(IAppDbContext db, IStockMutator mutator)
     : IRequestHandler<ReleaseStockCommand, Result<StockMutationOutcome>>
 {
-    public Task<Result<StockMutationOutcome>> Handle(
-        ReleaseStockCommand command, CancellationToken cancellationToken) =>
-        mutator.ApplyAsync(
+    public async Task<Result<StockMutationOutcome>> Handle(
+        ReleaseStockCommand command, CancellationToken cancellationToken)
+    {
+        if (await PhysicalWarehouseGuard.RefuseIfNotPhysicalAsync(db, command.WarehouseId, cancellationToken)
+            is { } refused)
+            return refused;
+
+        return await mutator.ApplyAsync(
             new StockMutationRequest(
                 command.ProductId,
                 command.WarehouseId,
@@ -30,4 +36,5 @@ public sealed class ReleaseStockHandler(IStockMutator mutator)
                 "stock.release_exceeds_reserved",
                 $"Cannot release {command.Quantity} unit(s); fewer are currently reserved."),
             cancellationToken);
+    }
 }

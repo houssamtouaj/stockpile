@@ -17,12 +17,17 @@ namespace Stockpile.Application.Stock.Commands.CountStock;
 /// because the writer shares the ambient transaction.
 /// </para>
 /// </summary>
-public sealed class CountStockHandler(IStockMutator mutator, IClock clock)
+public sealed class CountStockHandler(IAppDbContext db, IStockMutator mutator, IClock clock)
     : IRequestHandler<CountStockCommand, Result<StockMutationOutcome>>
 {
-    public Task<Result<StockMutationOutcome>> Handle(
-        CountStockCommand command, CancellationToken cancellationToken) =>
-        mutator.ApplyAsync(
+    public async Task<Result<StockMutationOutcome>> Handle(
+        CountStockCommand command, CancellationToken cancellationToken)
+    {
+        if (await PhysicalWarehouseGuard.RefuseIfNotPhysicalAsync(db, command.WarehouseId, cancellationToken)
+            is { } refused)
+            return refused;
+
+        return await mutator.ApplyAsync(
             new StockMutationRequest(
                 command.ProductId, command.WarehouseId, command.IdempotencyKey,
                 ReferenceType: "CycleCount", ReferenceId: null, Reason: command.Reason,
@@ -37,4 +42,5 @@ public sealed class CountStockHandler(IStockMutator mutator, IClock clock)
                 $"A count of {command.ObservedOnHand} is below the {held.Reserved} unit(s) "
                 + "currently reserved. Release the reservations first."),
             cancellationToken);
+    }
 }
