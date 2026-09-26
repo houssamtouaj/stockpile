@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Stockpile.Application.Common.Interfaces;
 using Stockpile.Application.Common.Messaging;
+using Stockpile.Application.Common.Orders;
 using Stockpile.Application.Transfers.Queries.GetTransfer;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.Entities;
@@ -72,25 +73,18 @@ public sealed class CreateTransferHandler(
                 "transfer.warehouse_not_physical",
                 "A transfer moves stock between two physical warehouses.");
 
-        var requested = command.Lines.Select(l => l.ProductId).Distinct().ToList();
-        var known = await db.Products
-            .Where(p => requested.Contains(p.Id))
-            .Select(p => p.Id)
-            .ToListAsync(cancellationToken);
-
-        if (requested.Except(known).Cast<Guid?>().FirstOrDefault() is { } missing)
-            return new NotFoundError("Product", missing);
-
-        // StockTransfer.Create owns the same-warehouse and line rules; ask it before
-        // taking a number, since nextval() is not rolled back.
         var lines = command.Lines.Select(l => (l.ProductId, l.Quantity)).ToList();
-        var probe = StockTransfer.Create(
-            string.Empty, command.FromWarehouseId, command.ToWarehouseId,
-            command.InTransitWarehouseId, clock.UtcNow, lines);
 
-        if (probe.IsFailure)
-            return probe.Error;
+        var valid = StockTransfer.Validate(
+            command.FromWarehouseId, command.ToWarehouseId, command.InTransitWarehouseId, lines);
+        if (valid.IsFailure)
+            return valid.Error;
 
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+            is { } productRefused)
+            return productRefused;
+
+        // Numbered after every check that could refuse: nextval() is not rolled back.
         var number = await numbers.NextAsync("TR", cancellationToken);
         var transfer = StockTransfer.Create(
             number, command.FromWarehouseId, command.ToWarehouseId,

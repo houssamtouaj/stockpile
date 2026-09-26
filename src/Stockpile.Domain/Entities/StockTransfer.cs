@@ -40,6 +40,37 @@ public sealed class StockTransfer : Entity
         DateTimeOffset createdAt,
         IReadOnlyList<(Guid ProductId, int Quantity)> lines)
     {
+        var valid = Validate(fromWarehouseId, toWarehouseId, inTransitWarehouseId, lines);
+        if (valid.IsFailure)
+            return valid.Error;
+
+        var transfer = new StockTransfer
+        {
+            Number = number,
+            FromWarehouseId = fromWarehouseId,
+            ToWarehouseId = toWarehouseId,
+            InTransitWarehouseId = inTransitWarehouseId,
+            Status = TransferStatus.Draft,
+            CreatedAt = createdAt
+        };
+
+        foreach (var (productId, quantity) in lines)
+            transfer._lines.Add(StockTransferLine.Create(productId, quantity));
+
+        return transfer;
+    }
+
+    /// <summary>
+    /// The routing and line rules <see cref="Create"/> enforces, callable before there is a
+    /// number to create with: document numbers come from a sequence that does not roll
+    /// back, so a handler asks first and numbers only a transfer that will be created.
+    /// </summary>
+    public static Result Validate(
+        Guid fromWarehouseId,
+        Guid toWarehouseId,
+        Guid inTransitWarehouseId,
+        IReadOnlyList<(Guid ProductId, int Quantity)> lines)
+    {
         if (lines.Count == 0)
             return new DomainRuleError("transfer.lines_required", "A transfer needs at least one line.");
 
@@ -62,20 +93,7 @@ public sealed class StockTransfer : Entity
         if (lines.Any(l => l.Quantity <= 0))
             return new DomainRuleError("transfer.line_quantity_invalid", "Every line quantity must be positive.");
 
-        var transfer = new StockTransfer
-        {
-            Number = number,
-            FromWarehouseId = fromWarehouseId,
-            ToWarehouseId = toWarehouseId,
-            InTransitWarehouseId = inTransitWarehouseId,
-            Status = TransferStatus.Draft,
-            CreatedAt = createdAt
-        };
-
-        foreach (var (productId, quantity) in lines)
-            transfer._lines.Add(StockTransferLine.Create(productId, quantity));
-
-        return transfer;
+        return Result.Ok();
     }
 
     public Result Dispatch(DateTimeOffset occurredAt)

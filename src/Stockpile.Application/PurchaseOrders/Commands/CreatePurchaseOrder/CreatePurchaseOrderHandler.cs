@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Stockpile.Application.Common.Interfaces;
+using Stockpile.Application.Common.Orders;
 using Stockpile.Application.PurchaseOrders.Queries.GetPurchaseOrder;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.Entities;
@@ -33,30 +34,21 @@ public sealed class CreatePurchaseOrderHandler(
             return new DomainRuleError(
                 "po.warehouse_not_physical", "A purchase order must be delivered to a physical warehouse.");
 
-        var requested = command.Lines.Select(l => l.ProductId).Distinct().ToList();
-        var known = await db.Products
-            .Where(p => requested.Contains(p.Id))
-            .Select(p => p.Id)
-            .ToListAsync(cancellationToken);
+        var lines = command.Lines.Select(l => (l.ProductId, l.Quantity, l.UnitCostCents)).ToList();
 
-        if (requested.Except(known).Cast<Guid?>().FirstOrDefault() is { } missing)
-            return new NotFoundError("Product", missing);
+        var validLines = PurchaseOrder.ValidateLines(lines);
+        if (validLines.IsFailure)
+            return validLines.Error;
+
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+            is { } productRefused)
+            return productRefused;
 
         // Numbered after every check that could refuse: nextval() is not rolled back.
         var number = await numbers.NextAsync("PO", cancellationToken);
 
-        var created = PurchaseOrder.Create(
-            number,
-            command.SupplierId,
-            command.WarehouseId,
-            command.ExpectedAt,
-            clock.UtcNow,
-            command.Lines.Select(l => (l.ProductId, l.Quantity, l.UnitCostCents)).ToList());
-
-        if (created.IsFailure)
-            return created.Error;
-
-        var order = created.Value;
+        var order = PurchaseOrder.Create(
+            number, command.SupplierId, command.WarehouseId, command.ExpectedAt, clock.UtcNow, lines).Value;
         db.PurchaseOrders.Add(order);
         await db.SaveChangesAsync(cancellationToken);
 

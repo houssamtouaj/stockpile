@@ -28,6 +28,33 @@ public sealed class PurchaseOrder : Entity
         DateTimeOffset createdAt,
         IReadOnlyList<(Guid ProductId, int Quantity, long UnitCostCents)> lines)
     {
+        var valid = ValidateLines(lines);
+        if (valid.IsFailure)
+            return valid.Error;
+
+        var order = new PurchaseOrder
+        {
+            Number = number,
+            SupplierId = supplierId,
+            WarehouseId = warehouseId,
+            Status = PurchaseOrderStatus.Draft,
+            ExpectedAt = expectedAt,
+            CreatedAt = createdAt
+        };
+
+        foreach (var (productId, quantity, unitCostCents) in lines)
+            order._lines.Add(PurchaseOrderLine.Create(productId, quantity, unitCostCents));
+
+        return order;
+    }
+
+    /// <summary>
+    /// The line rules <see cref="Create"/> enforces, callable before there is a number to
+    /// create with: document numbers come from a sequence that does not roll back, so a
+    /// handler asks first and numbers only an order that will be created.
+    /// </summary>
+    public static Result ValidateLines(IReadOnlyList<(Guid ProductId, int Quantity, long UnitCostCents)> lines)
+    {
         if (lines.Count == 0)
             return new DomainRuleError("po.lines_required", "A purchase order needs at least one line.");
 
@@ -44,20 +71,7 @@ public sealed class PurchaseOrder : Entity
         if (lines.Any(l => l.UnitCostCents < 0))
             return new DomainRuleError("po.line_cost_invalid", "A unit cost cannot be negative.");
 
-        var order = new PurchaseOrder
-        {
-            Number = number,
-            SupplierId = supplierId,
-            WarehouseId = warehouseId,
-            Status = PurchaseOrderStatus.Draft,
-            ExpectedAt = expectedAt,
-            CreatedAt = createdAt
-        };
-
-        foreach (var (productId, quantity, unitCostCents) in lines)
-            order._lines.Add(PurchaseOrderLine.Create(productId, quantity, unitCostCents));
-
-        return order;
+        return Result.Ok();
     }
 
     public Result Submit(DateTimeOffset occurredAt)

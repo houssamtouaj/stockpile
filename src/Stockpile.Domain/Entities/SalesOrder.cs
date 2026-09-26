@@ -27,16 +27,9 @@ public sealed class SalesOrder : Entity
         DateTimeOffset createdAt,
         IReadOnlyList<(Guid ProductId, int Quantity, long UnitPriceCents)> lines)
     {
-        if (lines.Count == 0)
-            return new DomainRuleError("so.lines_required", "A sales order needs at least one line.");
-
-        if (lines.Select(l => l.ProductId).Distinct().Count() != lines.Count)
-            return new DomainRuleError(
-                "so.duplicate_product_line",
-                "A product may appear on only one line. Merge the quantities.");
-
-        if (lines.Any(l => l.Quantity <= 0))
-            return new DomainRuleError("so.line_quantity_invalid", "Every line quantity must be positive.");
+        var valid = ValidateLines(lines);
+        if (valid.IsFailure)
+            return valid.Error;
 
         var order = new SalesOrder
         {
@@ -51,6 +44,27 @@ public sealed class SalesOrder : Entity
             order._lines.Add(SalesOrderLine.Create(productId, quantity, unitPriceCents));
 
         return order;
+    }
+
+    /// <summary>
+    /// The line rules <see cref="Create"/> enforces, callable before there is a number to
+    /// create with: document numbers come from a sequence that does not roll back, so a
+    /// handler asks first and numbers only an order that will be created.
+    /// </summary>
+    public static Result ValidateLines(IReadOnlyList<(Guid ProductId, int Quantity, long UnitPriceCents)> lines)
+    {
+        if (lines.Count == 0)
+            return new DomainRuleError("so.lines_required", "A sales order needs at least one line.");
+
+        if (lines.Select(l => l.ProductId).Distinct().Count() != lines.Count)
+            return new DomainRuleError(
+                "so.duplicate_product_line",
+                "A product may appear on only one line. Merge the quantities.");
+
+        if (lines.Any(l => l.Quantity <= 0))
+            return new DomainRuleError("so.line_quantity_invalid", "Every line quantity must be positive.");
+
+        return Result.Ok();
     }
 
     public Result Confirm(DateTimeOffset occurredAt)

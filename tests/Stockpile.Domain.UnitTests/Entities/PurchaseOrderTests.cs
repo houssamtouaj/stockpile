@@ -251,4 +251,12 @@ public class PurchaseOrderTests
         order.DomainEvents.OfType<Events.OrderStatusChangedEvent>()
             .ShouldContain(e => e.FromStatus == "Draft" && e.ToStatus == "Submitted");
     }
+
+    [Fact]
+    public void ValidateLines_refusesWhatCreateRefuses_withoutANumber()
+    {
+        PurchaseOrder.ValidateLines([]).Error!.Code.ShouldBe("po.lines_required");
+        PurchaseOrder.ValidateLines([(ProductA, 1, -1)]).Error!.Code.ShouldBe("po.line_cost_invalid");
+        PurchaseOrder.ValidateLines([(ProductA, 1, 100)]).IsSuccess.ShouldBeTrue();
+    }
 }

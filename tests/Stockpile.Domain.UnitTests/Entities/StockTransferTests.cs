@@ -220,4 +220,14 @@ public class StockTransferTests
 
         transfer.RecordDispatchCost(Guid.CreateVersion7(), 250).Error!.Code.ShouldBe("not_found");
     }
+
+    [Fact]
+    public void Validate_refusesWhatCreateRefuses_withoutANumber()
+    {
+        StockTransfer.Validate(From, From, InTransit, [(ProductA, 1)])
+            .Error!.Code.ShouldBe("transfer.same_warehouse");
+        StockTransfer.Validate(From, To, InTransit, [(ProductA, 1), (ProductA, 2)])
+            .Error!.Code.ShouldBe("transfer.duplicate_product_line");
+        StockTransfer.Validate(From, To, InTransit, [(ProductA, 1)]).IsSuccess.ShouldBeTrue();
+    }
 }

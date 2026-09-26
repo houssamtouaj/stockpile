@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Stockpile.Application.Common.Interfaces;
+using Stockpile.Application.Common.Orders;
 using Stockpile.Application.SalesOrders.Queries.GetSalesOrder;
 using Stockpile.Domain.Common;
 using Stockpile.Domain.Entities;
@@ -33,25 +34,21 @@ public sealed class CreateSalesOrderHandler(
             return new DomainRuleError(
                 "so.warehouse_not_physical", "A sales order must ship from a physical warehouse.");
 
-        var missing = await MissingProductAsync(command, cancellationToken);
-        if (missing is { } productId)
-            return new NotFoundError("Product", productId);
+        var lines = command.Lines.Select(l => (l.ProductId, l.Quantity, l.UnitPriceCents)).ToList();
+
+        var validLines = SalesOrder.ValidateLines(lines);
+        if (validLines.IsFailure)
+            return validLines.Error;
+
+        if (await OrderProducts.CheckAsync(db, command.Lines.Select(l => l.ProductId), cancellationToken)
+            is { } productRefused)
+            return productRefused;
 
         // Numbered last, after every check that could refuse: nextval() is not rolled back,
         // so numbering first would burn a number on every rejected request.
         var number = await numbers.NextAsync("SO", cancellationToken);
 
-        var created = SalesOrder.Create(
-            number,
-            command.CustomerId,
-            command.WarehouseId,
-            clock.UtcNow,
-            command.Lines.Select(l => (l.ProductId, l.Quantity, l.UnitPriceCents)).ToList());
-
-        if (created.IsFailure)
-            return created.Error;
-
-        var order = created.Value;
+        var order = SalesOrder.Create(number, command.CustomerId, command.WarehouseId, clock.UtcNow, lines).Value;
         db.SalesOrders.Add(order);
 
         // Flushed so Postgres assigns xmin and the response carries a usable RowVersion.
@@ -61,18 +58,5 @@ public sealed class CreateSalesOrderHandler(
             order.WarehouseId, order.Id, nameof(SalesOrder), order.Status.ToString()));
 
         return SalesOrderDto.From(order);
-    }
-
-    private async Task<Guid?> MissingProductAsync(
-        CreateSalesOrderCommand command, CancellationToken cancellationToken)
-    {
-        var requested = command.Lines.Select(l => l.ProductId).Distinct().ToList();
-
-        var known = await db.Products
-            .Where(p => requested.Contains(p.Id))
-            .Select(p => p.Id)
-            .ToListAsync(cancellationToken);
-
-        return requested.Except(known).Cast<Guid?>().FirstOrDefault();
     }
 }

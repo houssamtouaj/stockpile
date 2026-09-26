@@ -219,4 +219,13 @@ public class SalesOrderTests
             order.Pick(line.Id, line.QuantityOrdered);
         return order;
     }
+
+    [Fact]
+    public void ValidateLines_refusesWhatCreateRefuses_withoutANumber()
+    {
+        SalesOrder.ValidateLines([]).Error!.Code.ShouldBe("so.lines_required");
+        SalesOrder.ValidateLines([(ProductA, 1, 100), (ProductA, 2, 100)])
+            .Error!.Code.ShouldBe("so.duplicate_product_line");
+        SalesOrder.ValidateLines([(ProductA, 1, 100)]).IsSuccess.ShouldBeTrue();
+    }
 }
